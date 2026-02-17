@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run wasm:build && vite build",
+    "build": "vite build",
     "preview": "vite preview",
     "wasm:build": "cd watercolor-engine && wasm-pack build --target web --out-dir ../wasm-pkg",
     "wasm:dev": "cd watercolor-engine && wasm-pack build --dev --target web --out-dir ../wasm-pkg",
