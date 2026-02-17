@@ -1,0 +1,16 @@
+{
+  "name": "watercolor-engine",
+  "type": "module",
+  "description": "Watercolor simulation physics engine in Rust/WASM",
+  "version": "0.1.0",
+  "files": [
+    "watercolor_engine_bg.wasm",
+    "watercolor_engine.js",
+    "watercolor_engine.d.ts"
+  ],
+  "main": "watercolor_engine.js",
+  "types": "watercolor_engine.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
