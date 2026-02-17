@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Palette, Droplets, Waves, Beaker, RefreshCcw, Paintbrush, Image } from 'lucide-react';
+import { Palette, Droplets, Waves, Beaker, RefreshCcw, Paintbrush, Image, Gauge } from 'lucide-react';
 
 const SCALE = 3;
 
@@ -27,7 +27,7 @@ function hexToRgb(hex) {
     return { r, g, b };
 }
 
-// --- 슬라이더 ---
+// 슬라이더
 function ControlSlider({ label, value, min, max, step, onChange }) {
     const display = typeof value === 'number' && !Number.isInteger(value)
         ? value.toFixed(3) : value;
@@ -45,13 +45,14 @@ function ControlSlider({ label, value, min, max, step, onChange }) {
 
 export default function App() {
     const canvasRef = useRef(null);
+    const cursorCanvasRef = useRef(null);
     const engineRef = useRef(null);
     const wasmModuleRef = useRef(null);
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [activeColor, setActiveColor] = useState('#1e3a8a');
-    const [brush, setBrush] = useState({ size: 6, water: 2.5, pigment: 0.6 });
+    const [brush, setBrush] = useState({ size: 8, water: 2.5, pigment: 0.6, speedSensitivity: 0.5 });
     const [physics, setPhysics] = useState({
         dt: 0.15, evaporation: 0.002, viscosity: 0.05,
         pressure: 5.0, iterations: 10,
@@ -61,6 +62,12 @@ export default function App() {
     const [showTexture, setShowTexture] = useState(true);
     const [gridSize, setGridSize] = useState(300);
     const [paperTextureUrl, setPaperTextureUrl] = useState('');
+
+    // 속도 추적 refs
+    const lastPosRef = useRef(null);
+    const lastTimeRef = useRef(null);
+    const velocityRef = useRef(0);
+    const dynamicSizeRef = useRef(8);
 
     // WASM 초기화
     useEffect(() => {
@@ -146,8 +153,39 @@ export default function App() {
         tmp.getContext('2d').putImageData(imageData, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(tmp, 0, 0, canvas.width, canvas.height);
     }, [gridSize]);
+
+    // 커서 프리뷰
+    const drawCursor = useCallback((clientX, clientY) => {
+        const cursorCanvas = cursorCanvasRef.current;
+        const mainCanvas = canvasRef.current;
+        if (!cursorCanvas || !mainCanvas) return;
+        const ctx = cursorCanvas.getContext('2d');
+        ctx.clearRect(0, 0, cursorCanvas.width, cursorCanvas.height);
+        const rect = mainCanvas.getBoundingClientRect();
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
+        if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
+
+        const dynSize = dynamicSizeRef.current * SCALE;
+
+        // 반투명 브러시 프리뷰
+        ctx.beginPath();
+        ctx.arc(x, y, dynSize, 0, Math.PI * 2);
+        ctx.strokeStyle = activeColor + '88';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.closePath();
+
+        // 중심점
+        ctx.beginPath();
+        ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = activeColor;
+        ctx.fill();
+        ctx.closePath();
+    }, [activeColor]);
 
     // 시뮬레이션 루프
     useEffect(() => {
@@ -164,9 +202,32 @@ export default function App() {
         return () => cancelAnimationFrame(frameId);
     }, [isSimulating, loading, renderFrame]);
 
-    // 브러시 상호작용
-    const lastPosRef = useRef(null);
+    // 속도 계산 + 동적 브러시 크기
+    const calcVelocityAndSize = useCallback((x, y, now) => {
+        let velocity = 0;
+        if (lastPosRef.current && lastTimeRef.current) {
+            const dx = x - lastPosRef.current.x;
+            const dy = y - lastPosRef.current.y;
+            const dt = (now - lastTimeRef.current) / 1000;
+            if (dt > 0) {
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                velocity = dist / dt; // px/second
+            }
+        }
+        // 지수 이동 평균 (부드러운 전환)
+        velocityRef.current = velocityRef.current * 0.6 + velocity * 0.4;
 
+        // 속도 감응 브러시 크기
+        const sens = brush.speedSensitivity;
+        const speedFactor = 1.0 / (1.0 + velocityRef.current * sens * 0.01);
+        const minSize = brush.size * 0.3;
+        const dynSize = minSize + (brush.size - minSize) * speedFactor;
+        dynamicSizeRef.current = dynSize;
+
+        return { velocity: velocityRef.current, dynSize };
+    }, [brush.size, brush.speedSensitivity]);
+
+    // 브러시 상호작용
     const handleInteraction = useCallback((e, isFirst) => {
         const engine = engineRef.current;
         const canvas = canvasRef.current;
@@ -175,29 +236,54 @@ export default function App() {
         const x = Math.floor((e.clientX - rect.left) / SCALE);
         const y = Math.floor((e.clientY - rect.top) / SCALE);
         const { r, g, b } = hexToRgb(activeColor);
+        const now = performance.now();
+
+        const { velocity, dynSize } = calcVelocityAndSize(x, y, now);
 
         if (isFirst || !lastPosRef.current) {
-            engine.apply_brush(x, y, brush.size, brush.water, brush.pigment, r, g, b);
+            engine.apply_brush(x, y, dynSize, brush.water, brush.pigment, r, g, b, 0.0, 1.0);
         } else {
             engine.apply_brush_stroke(
                 lastPosRef.current.x, lastPosRef.current.y,
-                x, y, brush.size, brush.water, brush.pigment, r, g, b
+                x, y, dynSize, brush.water, brush.pigment, r, g, b,
+                velocity
             );
         }
         lastPosRef.current = { x, y };
-    }, [brush, activeColor]);
+        lastTimeRef.current = now;
+
+        // 커서 프리뷰 업데이트
+        drawCursor(e.clientX, e.clientY);
+    }, [brush, activeColor, calcVelocityAndSize, drawCursor]);
 
     const handleMouseDown = useCallback((e) => {
+        velocityRef.current = 0; // 새 스트로크 시작
+        dynamicSizeRef.current = brush.size;
         handleInteraction(e, true);
         const draw = (me) => handleInteraction(me, false);
         const stop = () => {
             lastPosRef.current = null;
+            lastTimeRef.current = null;
+            velocityRef.current = 0;
+            dynamicSizeRef.current = brush.size;
             window.removeEventListener('mousemove', draw);
             window.removeEventListener('mouseup', stop);
         };
         window.addEventListener('mousemove', draw);
         window.addEventListener('mouseup', stop);
-    }, [handleInteraction]);
+    }, [handleInteraction, brush.size]);
+
+    // 캔버스 위 마우스 이동 시 커서 프리뷰
+    const handleCanvasMouseMove = useCallback((e) => {
+        drawCursor(e.clientX, e.clientY);
+    }, [drawCursor]);
+
+    const handleCanvasMouseLeave = useCallback(() => {
+        const cursorCanvas = cursorCanvasRef.current;
+        if (cursorCanvas) {
+            cursorCanvas.getContext('2d').clearRect(0, 0, cursorCanvas.width, cursorCanvas.height);
+        }
+    }, []);
 
     const handleReset = useCallback(() => {
         const engine = engineRef.current;
@@ -255,8 +341,6 @@ export default function App() {
                             <Palette />
                             <span className="section-title">색상 선택</span>
                         </div>
-
-                        {/* 컬러 피커 */}
                         <div className="color-picker-area">
                             <input
                                 type="color"
@@ -266,8 +350,6 @@ export default function App() {
                             />
                             <span className="color-hex">{activeColor.toUpperCase()}</span>
                         </div>
-
-                        {/* 프리셋 팔레트 */}
                         <div className="preset-palette">
                             {COLOR_PRESETS.map((preset) => (
                                 <button
@@ -288,12 +370,14 @@ export default function App() {
                             <span className="section-title">브러시 설정</span>
                         </div>
                         <div className="slider-group">
-                            <ControlSlider label="붓 크기" value={brush.size} min={1} max={20} step={1}
+                            <ControlSlider label="붓 크기" value={brush.size} min={1} max={25} step={1}
                                 onChange={(v) => setBrush({ ...brush, size: v })} />
                             <ControlSlider label="수분량" value={brush.water} min={0.1} max={5.0} step={0.1}
                                 onChange={(v) => setBrush({ ...brush, water: v })} />
                             <ControlSlider label="안료 농도" value={brush.pigment} min={0.05} max={2.0} step={0.05}
                                 onChange={(v) => setBrush({ ...brush, pigment: v })} />
+                            <ControlSlider label="속도 감응" value={brush.speedSensitivity} min={0} max={1.0} step={0.05}
+                                onChange={(v) => setBrush({ ...brush, speedSensitivity: v })} />
                         </div>
                     </section>
 
@@ -362,6 +446,15 @@ export default function App() {
                             ref={canvasRef}
                             width={gridSize * SCALE}
                             height={gridSize * SCALE}
+                            onMouseDown={handleMouseDown}
+                        />
+                        <canvas
+                            ref={cursorCanvasRef}
+                            className="cursor-canvas"
+                            width={gridSize * SCALE}
+                            height={gridSize * SCALE}
+                            onMouseMove={handleCanvasMouseMove}
+                            onMouseLeave={handleCanvasMouseLeave}
                             onMouseDown={handleMouseDown}
                         />
                     </div>

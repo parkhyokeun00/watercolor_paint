@@ -1,0 +1,13 @@
+# 1. wasm32 타겟 추가 (최초 1회)
+rustup target add wasm32-unknown-unknown
+
+# 2. WASM 빌드
+cd watercolor-engine
+wasm-pack build --target web --out-dir ../wasm-pkg
+cd ..
+
+# 3. npm 설치
+npm install
+
+# 4. 개발 서버 실행
+npm run dev

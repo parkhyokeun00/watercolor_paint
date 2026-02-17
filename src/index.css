@@ -472,11 +472,25 @@ input[type="range"]::-moz-range-thumb {
 
 canvas {
   display: block;
-  cursor: crosshair;
-  position: relative;
+  cursor: none;
+  position: absolute;
+  top: 0;
+  left: 0;
   z-index: 1;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
+}
+
+.cursor-canvas {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  cursor: none;
+  pointer-events: auto;
+}
+
+.canvas-frame {
+  position: relative;
 }
 
 /* --- 상태 요약 바 --- */
