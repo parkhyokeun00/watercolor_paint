@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Palette, Droplets, Waves, Beaker, RefreshCcw, Paintbrush, Image, Gauge, Maximize } from 'lucide-react';
+import { Palette, Droplets, Waves, Beaker, RefreshCcw, Paintbrush, Image, Gauge, Maximize, Download } from 'lucide-react';
 
 const SCALE = 3;
 
@@ -290,6 +290,17 @@ export default function App() {
         renderFrame();
     }, [renderFrame]);
 
+    const handleDownload = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const link = document.createElement('a');
+        const now = new Date();
+        const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+        link.download = `watercolor_${ts}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+    }, []);
+
     // --- 에러/로딩 ---
     if (error) {
         return (
@@ -328,9 +339,9 @@ export default function App() {
                         <span className="header-badge">WASM</span>
                     </h1>
                 </div>
-                <button className="btn-reset" onClick={handleReset}>
-                    <RefreshCcw /> 캔버스 초기화
-                </button>
+                <div className="header-actions">
+                    {/* Actions moved to sidebar */}
+                </div>
             </header>
 
             <main className="main-area">
@@ -451,6 +462,18 @@ export default function App() {
                             <div className={`toggle-track ${showTexture ? 'on' : 'off'}`}>
                                 <div className="toggle-thumb" />
                             </div>
+                        </div>
+                    </section>
+
+                    {/* 작업 관리 */}
+                    <section className="card-section">
+                        <div className="sidebar-actions">
+                            <button className="btn-download-full" onClick={handleDownload}>
+                                <Download size={18} /> 이미지 다운로드
+                            </button>
+                            <button className="btn-reset-full" onClick={handleReset}>
+                                <RefreshCcw size={18} /> 캔버스 초기화
+                            </button>
                         </div>
                     </section>
                 </aside>

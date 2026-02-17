@@ -547,6 +547,60 @@ canvas {
   letter-spacing: 0.5px;
 }
 
+/* --- 사이드바 액션 버튼 --- */
+.sidebar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.btn-download-full,
+.btn-reset-full {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.btn-download-full {
+  background: var(--primary-100);
+  color: var(--primary-800);
+  border: 1px solid var(--primary-300);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.btn-download-full:hover {
+  background: var(--primary-200);
+  border-color: var(--primary-400);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transform: translateY(-1px);
+}
+
+.btn-download-full:active {
+  transform: translateY(0);
+  background: var(--primary-300);
+}
+
+.btn-reset-full {
+  background: var(--stone-100);
+  color: var(--stone-600);
+  border-color: var(--stone-200);
+}
+
+.btn-reset-full:hover {
+  background: var(--stone-200);
+  color: var(--stone-800);
+}
+
 /* --- 상태 요약 바 --- */
 .status-bar {
   position: absolute;
