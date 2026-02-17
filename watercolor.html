@@ -1,0 +1,383 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Palette, Droplets, Wind, Layers, Settings2, RefreshCcw, Waves, Beaker, SlidersHorizontal } from 'lucide-react';
+
+// --- 기본 상수 ---
+const GRID_SIZE = 100; 
+const SCALE = 6;      
+
+// 안료별 KM 기본값
+const PIGMENTS = {
+  Ultramarine: { k: [0.1, 0.2, 0.8], s: [0.4, 0.3, 0.1], granularity: 0.8, color: '#1e3a8a' },
+  Alizarin: { k: [0.1, 0.8, 0.4], s: [0.1, 0.1, 0.1], granularity: 0.2, color: '#be123c' },
+  Gamboge: { k: [0.1, 0.1, 0.9], s: [0.2, 0.2, 0.1], granularity: 0.4, color: '#f59e0b' },
+};
+
+const App = () => {
+  const canvasRef = useRef(null);
+  
+  // --- 조절 가능한 모든 옵션 상태 ---
+  const [activePigment, setActivePigment] = useState('Ultramarine');
+  const [brush, setBrush] = useState({ size: 4, water: 2.0, pigment: 0.5 });
+  const [physics, setPhysics] = useState({
+    dt: 0.15,
+    evaporation: 0.002,
+    viscosity: 0.05,    // 유체 마찰 (낮을수록 잘 흐름)
+    pressure: 5.0,      // 수압 전파 강도
+    iterations: 10,     // 솔버 반복 횟수
+  });
+  const [pigmentProps, setPigmentProps] = useState({
+    adhesion: 0.05,     // 안료가 종이에 붙는 속도 (낮을수록 더 오래 번짐)
+    granularity: 0.8,   // 과립화 영향력
+    staining: 0.5,      // 착색력 (추후 확장용)
+  });
+  
+  const [isSimulating, setIsSimulating] = useState(true);
+  const [showTexture, setShowTexture] = useState(true);
+  
+  // 시뮬레이션 데이터 데이터
+  const stateRef = useRef({
+    h: new Float32Array(GRID_SIZE * GRID_SIZE), 
+    u: new Float32Array(GRID_SIZE * GRID_SIZE), 
+    v: new Float32Array(GRID_SIZE * GRID_SIZE), 
+    p: new Float32Array(GRID_SIZE * GRID_SIZE), 
+    g: {
+      Ultramarine: new Float32Array(GRID_SIZE * GRID_SIZE),
+      Alizarin: new Float32Array(GRID_SIZE * GRID_SIZE),
+      Gamboge: new Float32Array(GRID_SIZE * GRID_SIZE),
+    },
+    d: {
+      Ultramarine: new Float32Array(GRID_SIZE * GRID_SIZE),
+      Alizarin: new Float32Array(GRID_SIZE * GRID_SIZE),
+      Gamboge: new Float32Array(GRID_SIZE * GRID_SIZE),
+    },
+    paperH: new Float32Array(GRID_SIZE * GRID_SIZE), 
+    mask: new Float32Array(GRID_SIZE * GRID_SIZE),   
+  });
+
+  useEffect(() => {
+    const s = stateRef.current;
+    for (let i = 0; i < GRID_SIZE; i++) {
+      for (let j = 0; j < GRID_SIZE; j++) {
+        const idx = i * GRID_SIZE + j;
+        s.paperH[idx] = Math.random() * 0.4 + Math.sin(i * 0.15) * 0.05 + Math.cos(j * 0.15) * 0.05;
+      }
+    }
+  }, []);
+
+  const updateVelocities = (s) => {
+    const friction = 1.0 - physics.viscosity;
+    for (let i = 1; i < GRID_SIZE - 1; i++) {
+      for (let j = 1; j < GRID_SIZE - 1; j++) {
+        const idx = i * GRID_SIZE + j;
+        const dhdx = (s.h[idx + 1] + s.paperH[idx + 1]) - (s.h[idx - 1] + s.paperH[idx - 1]);
+        const dhdy = (s.h[idx + GRID_SIZE] + s.paperH[idx + GRID_SIZE]) - (s.h[idx - GRID_SIZE] + s.paperH[idx - GRID_SIZE]);
+        s.u[idx] += -1.5 * dhdx * physics.dt; 
+        s.v[idx] += -1.5 * dhdy * physics.dt;
+        s.u[idx] *= friction;
+        s.v[idx] *= friction;
+      }
+    }
+  };
+
+  const relaxDivergence = (s) => {
+    for (let iter = 0; iter < physics.iterations; iter++) {
+      for (let i = 1; i < GRID_SIZE - 1; i++) {
+        for (let j = 1; j < GRID_SIZE - 1; j++) {
+          const idx = i * GRID_SIZE + j;
+          const div = (s.u[idx + 1] - s.u[idx - 1] + s.v[idx + GRID_SIZE] - s.v[idx - GRID_SIZE]) * 0.5;
+          s.p[idx] -= div * physics.pressure;
+          if (s.h[idx] > 0.01) {
+            s.p[idx] -= physics.evaporation * (1.0 - s.mask[idx]) * 5.0; 
+          }
+        }
+      }
+    }
+  };
+
+  const moveFluid = (s) => {
+    const nextH = new Float32Array(GRID_SIZE * GRID_SIZE);
+    const nextG = {
+      Ultramarine: new Float32Array(GRID_SIZE * GRID_SIZE),
+      Alizarin: new Float32Array(GRID_SIZE * GRID_SIZE),
+      Gamboge: new Float32Array(GRID_SIZE * GRID_SIZE),
+    };
+    
+    for (let i = 1; i < GRID_SIZE - 1; i++) {
+      for (let j = 1; j < GRID_SIZE - 1; j++) {
+        const idx = i * GRID_SIZE + j;
+        if (s.h[idx] <= 0) continue;
+
+        const prevI = Math.max(0, Math.min(GRID_SIZE - 1, i - s.u[idx] * physics.dt));
+        const prevJ = Math.max(0, Math.min(GRID_SIZE - 1, j - s.v[idx] * physics.dt));
+        const prevIdx = Math.round(prevI) * GRID_SIZE + Math.round(prevJ);
+        
+        nextH[idx] = s.h[prevIdx] * (1 - physics.evaporation);
+        Object.keys(nextG).forEach(p => {
+          nextG[p][idx] = s.g[p][prevIdx];
+        });
+      }
+    }
+    s.h.set(nextH);
+    Object.keys(nextG).forEach(p => s.g[p].set(nextG[p]));
+  };
+
+  const deposition = (s) => {
+    Object.keys(PIGMENTS).forEach(name => {
+      const g = s.g[name];
+      const d = s.d[name];
+      for (let i = 0; i < g.length; i++) {
+        if (s.h[i] < 0.01) continue;
+        const speed = Math.sqrt(s.u[i]**2 + s.v[i]**2);
+        // 사용자 설정 침전 속도 및 과립화 적용
+        const depRate = pigmentProps.adhesion * (1.0 / (speed + 1.0)) * (1.0 + pigmentProps.granularity * (1.0 - s.paperH[i]));
+        const amount = g[i] * depRate * physics.dt;
+        d[i] += amount;
+        g[i] -= amount;
+      }
+    });
+  };
+
+  const render = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx.createImageData(GRID_SIZE, GRID_SIZE);
+    const s = stateRef.current;
+
+    for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
+      const idx = i * 4;
+      let totalR = [1.0, 1.0, 1.0];
+
+      Object.keys(PIGMENTS).forEach(name => {
+        const pig = PIGMENTS[name];
+        const thickness = s.d[name][i] * 6.0; 
+        if (thickness < 0.001) return;
+
+        for (let c = 0; c < 3; c++) {
+          const K = pig.k[c];
+          const S = pig.s[c];
+          const a = 1 + K/S;
+          const b = Math.sqrt(Math.max(0, a*a - 1));
+          const bSx = b * S * thickness;
+          const sinh = Math.sinh(bSx);
+          const cosh = Math.cosh(bSx);
+          const denom = (a * sinh + b * cosh) || 1;
+          const R_layer = sinh / denom;
+          const T_layer = b / denom;
+          const R_prev = totalR[c];
+          totalR[c] = R_layer + (T_layer * T_layer * R_prev) / (1 - R_layer * R_prev);
+        }
+      });
+
+      const tex = showTexture ? (0.8 + s.paperH[i] * 0.4) : 1.0;
+      imageData.data[idx] = Math.max(0, Math.min(255, totalR[0] * 255 * tex));
+      imageData.data[idx + 1] = Math.max(0, Math.min(255, totalR[1] * 255 * tex));
+      imageData.data[idx + 2] = Math.max(0, Math.min(255, totalR[2] * 255 * tex));
+      imageData.data[idx + 3] = 255;
+    }
+
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = GRID_SIZE;
+    tempCanvas.height = GRID_SIZE;
+    tempCanvas.getContext('2d').putImageData(imageData, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
+  }, [showTexture]);
+
+  useEffect(() => {
+    if (!isSimulating) return;
+    let frameId;
+    const loop = () => {
+      const s = stateRef.current;
+      updateVelocities(s);
+      relaxDivergence(s);
+      moveFluid(s);
+      deposition(s);
+      render();
+      frameId = requestAnimationFrame(loop);
+    };
+    loop();
+    return () => cancelAnimationFrame(frameId);
+  }, [isSimulating, render, physics, pigmentProps]);
+
+  const handleInteraction = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) / SCALE);
+    const y = Math.floor((e.clientY - rect.top) / SCALE);
+    
+    const s = stateRef.current;
+    for (let i = -brush.size; i <= brush.size; i++) {
+      for (let j = -brush.size; j <= brush.size; j++) {
+        const targetX = x + i;
+        const targetY = y + j;
+        if (targetX >= 0 && targetX < GRID_SIZE && targetY >= 0 && targetY < GRID_SIZE) {
+          const idx = targetY * GRID_SIZE + targetX;
+          const dist = Math.sqrt(i*i + j*j);
+          if (dist <= brush.size) {
+            const factor = 1 - dist/brush.size;
+            s.h[idx] += brush.water * factor; 
+            s.g[activePigment][idx] += brush.pigment * factor; 
+            s.mask[idx] = 1.0;
+          }
+        }
+      }
+    }
+  };
+
+  const resetCanvas = () => {
+    const s = stateRef.current;
+    s.h.fill(0); s.u.fill(0); s.v.fill(0); s.p.fill(0); s.mask.fill(0);
+    Object.keys(PIGMENTS).forEach(p => { s.g[p].fill(0); s.d[p].fill(0); });
+    render();
+  };
+
+  return (
+    <div className="flex flex-col h-screen bg-stone-100 text-stone-800 font-sans overflow-hidden">
+      <header className="px-6 py-4 bg-white border-b border-stone-200 flex justify-between items-center shrink-0 shadow-sm z-10">
+        <div className="flex items-center gap-2">
+          <Palette className="w-6 h-6 text-indigo-500" />
+          <h1 className="text-xl font-bold tracking-tight">마스터 수채화 스튜디오 <span className="text-sm font-normal text-stone-400 ml-2">Total Control Physics</span></h1>
+        </div>
+        <button onClick={resetCanvas} className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-stone-100 hover:bg-red-50 hover:text-red-600 transition-all text-sm font-medium">
+          <RefreshCcw className="w-4 h-4" /> 캔버스 초기화
+        </button>
+      </header>
+
+      <main className="flex-1 flex overflow-hidden">
+        {/* 컨트롤 패널 */}
+        <aside className="w-80 bg-white border-r border-stone-200 p-6 flex flex-col gap-6 overflow-y-auto custom-scrollbar">
+          
+          {/* 안료 */}
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Droplets className="w-4 h-4 text-indigo-500" />
+              <h2 className="font-bold text-xs uppercase tracking-widest text-stone-400">안료 선택</h2>
+            </div>
+            <div className="grid grid-cols-1 gap-1.5">
+              {Object.keys(PIGMENTS).map(name => (
+                <button
+                  key={name}
+                  onClick={() => setActivePigment(name)}
+                  className={`flex items-center gap-3 p-2.5 rounded-lg border transition-all ${
+                    activePigment === name ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500' : 'border-stone-100 bg-stone-50 hover:bg-stone-100'
+                  }`}
+                >
+                  <div className="w-5 h-5 rounded-full shadow-inner" style={{ backgroundColor: PIGMENTS[name].color }} />
+                  <span className="text-sm font-semibold">{name}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* 브러시 */}
+          <section className="bg-stone-50 p-4 rounded-xl border border-stone-100">
+            <div className="flex items-center gap-2 mb-4">
+              <Layers className="w-4 h-4 text-indigo-500" />
+              <h2 className="font-bold text-xs uppercase tracking-widest text-stone-400">브러시 설정</h2>
+            </div>
+            <div className="space-y-4">
+              <ControlSlider label="직경" value={brush.size} min={1} max={15} step={1} 
+                onChange={v => setBrush({...brush, size: v})} />
+              <ControlSlider label="수분 공급량" value={brush.water} min={0.1} max={5.0} step={0.1} 
+                onChange={v => setBrush({...brush, water: v})} />
+              <ControlSlider label="안료 농도" value={brush.pigment} min={0.05} max={1.5} step={0.05} 
+                onChange={v => setBrush({...brush, pigment: v})} />
+            </div>
+          </section>
+
+          {/* 물리 엔진 */}
+          <section>
+            <div className="flex items-center gap-2 mb-4">
+              <Waves className="w-4 h-4 text-indigo-500" />
+              <h2 className="font-bold text-xs uppercase tracking-widest text-stone-400">물리 엔진 (유체)</h2>
+            </div>
+            <div className="space-y-4">
+              <ControlSlider label="점성 (Friction)" value={physics.viscosity} min={0} max={0.5} step={0.01} 
+                onChange={v => setPhysics({...physics, viscosity: v})} />
+              <ControlSlider label="수압 강도 (Pressure)" value={physics.pressure} min={0.5} max={15.0} step={0.5} 
+                onChange={v => setPhysics({...physics, pressure: v})} />
+              <ControlSlider label="증발 속도 (Evap)" value={physics.evaporation} min={0.0001} max={0.01} step={0.0001} 
+                onChange={v => setPhysics({...physics, evaporation: v})} />
+              <ControlSlider label="계산 반복 (Steps)" value={physics.iterations} min={1} max={30} step={1} 
+                onChange={v => setPhysics({...physics, iterations: v})} />
+            </div>
+          </section>
+
+          {/* 안료 물리 */}
+          <section>
+            <div className="flex items-center gap-2 mb-4">
+              <Beaker className="w-4 h-4 text-indigo-500" />
+              <h2 className="font-bold text-xs uppercase tracking-widest text-stone-400">안료 거동 (화학)</h2>
+            </div>
+            <div className="space-y-4">
+              <ControlSlider label="흡착력 (Adhesion)" value={pigmentProps.adhesion} min={0.001} max={0.3} step={0.001} 
+                onChange={v => setPigmentProps({...pigmentProps, adhesion: v})} />
+              <ControlSlider label="과립화 (Granulation)" value={pigmentProps.granularity} min={0} max={2.0} step={0.1} 
+                onChange={v => setPigmentProps({...pigmentProps, granularity: v})} />
+            </div>
+          </section>
+
+          <section className="pt-4 border-t border-stone-100">
+            <label className="flex items-center justify-between cursor-pointer group">
+              <span className="text-sm font-medium text-stone-600">종이 질감 보이기</span>
+              <div onClick={() => setShowTexture(!showTexture)}
+                className={`w-10 h-5 rounded-full transition-colors relative ${showTexture ? 'bg-indigo-500' : 'bg-stone-300'}`}>
+                <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${showTexture ? 'left-6' : 'left-1'}`} />
+              </div>
+            </label>
+          </section>
+        </aside>
+
+        {/* 캔버스 영역 */}
+        <section className="flex-1 bg-stone-200 relative p-12 flex items-center justify-center overflow-auto">
+          <div className="bg-white shadow-[0_20px_50px_rgba(0,0,0,0.15)] relative overflow-hidden ring-8 ring-white rounded-sm" 
+               style={{ width: GRID_SIZE * SCALE, height: GRID_SIZE * SCALE }}>
+            {/* 종이 표면 질감 오버레이 */}
+            <div className="absolute inset-0 pointer-events-none opacity-30 mix-blend-multiply bg-[url('https://www.transparenttextures.com/patterns/handmade-paper.png')]" />
+            <canvas ref={canvasRef} width={GRID_SIZE * SCALE} height={GRID_SIZE * SCALE}
+              onMouseDown={(e) => {
+                const draw = (me) => handleInteraction(me);
+                const stop = () => { window.removeEventListener('mousemove', draw); window.removeEventListener('mouseup', stop); };
+                window.addEventListener('mousemove', draw); window.addEventListener('mouseup', stop);
+                handleInteraction(e);
+              }}
+              className="cursor-crosshair relative z-10" />
+          </div>
+
+          {/* 상태 요약 바 */}
+          <div className="absolute bottom-8 right-8 bg-white/90 backdrop-blur-sm p-3 rounded-xl shadow-lg border border-stone-200 text-[10px] flex gap-4">
+             <div className="flex flex-col"><span className="text-stone-400">FLUID</span><span className="font-bold">{(1-physics.viscosity).toFixed(2)} Flow</span></div>
+             <div className="flex flex-col"><span className="text-stone-400">PRESSURE</span><span className="font-bold">{physics.pressure.toFixed(1)}x</span></div>
+             <div className="flex flex-col"><span className="text-stone-400">PIGMENT</span><span className="font-bold">{pigmentProps.adhesion.toFixed(3)} Ads</span></div>
+          </div>
+        </section>
+      </main>
+
+      <style dangerouslySetInnerHTML={{ __html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e2e2; border-radius: 10px; }
+        canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+        input[type='range'] { -webkit-appearance: none; appearance: none; background: transparent; }
+        input[type='range']::-webkit-slider-runnable-track { width: 100%; height: 4px; background: #e2e8f0; border-radius: 2px; }
+        input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; background: #6366f1; border-radius: 50%; cursor: pointer; margin-top: -4px; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); transition: transform 0.1s; }
+        input[type='range']::-webkit-slider-thumb:hover { transform: scale(1.2); }
+      `}} />
+    </div>
+  );
+};
+
+// --- 공용 슬라이더 컴포넌트 ---
+const ControlSlider = ({ label, value, min, max, step, onChange }) => (
+  <div className="flex flex-col">
+    <div className="flex justify-between text-[11px] mb-1.5 font-medium">
+      <span className="text-stone-500">{label}</span>
+      <span className="text-indigo-600 font-bold">{typeof value === 'number' && !Number.isInteger(value) ? value.toFixed(3) : value}</span>
+    </div>
+    <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(parseFloat(e.target.value))} className="w-full" />
+  </div>
+);
+
+export default App;

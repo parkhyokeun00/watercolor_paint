@@ -1,0 +1,25 @@
+{
+  "name": "watercolor-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "wasm:build": "cd watercolor-engine && wasm-pack build --target web --out-dir ../wasm-pkg",
+    "wasm:dev": "cd watercolor-engine && wasm-pack build --dev --target web --out-dir ../wasm-pkg",
+    "setup": "npm run wasm:build && npm install"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.0",
+    "vite": "^6.0.0",
+    "vite-plugin-top-level-await": "^1.4.0",
+    "vite-plugin-wasm": "^3.3.0"
+  }
+}
