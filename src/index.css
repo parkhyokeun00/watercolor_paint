@@ -493,6 +493,60 @@ canvas {
   position: relative;
 }
 
+/* --- 캔버스 비율 선택 --- */
+.ratio-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.ratio-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--stone-200);
+  background: var(--stone-50);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-size: 9px;
+  color: var(--stone-600);
+}
+
+.ratio-btn:hover {
+  background: var(--primary-50);
+  border-color: var(--primary-300);
+}
+
+.ratio-btn.active {
+  background: var(--primary-100);
+  border-color: var(--primary-500);
+  color: var(--primary-700);
+  font-weight: 600;
+}
+
+.ratio-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.ratio-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.ratio-info {
+  text-align: center;
+  font-size: 10px;
+  color: var(--stone-400);
+  letter-spacing: 0.5px;
+}
+
 /* --- 상태 요약 바 --- */
 .status-bar {
   position: absolute;

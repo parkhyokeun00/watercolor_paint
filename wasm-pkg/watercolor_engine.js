@@ -12,7 +12,6 @@ export class WatercolorEngine {
         wasm.__wbg_watercolorengine_free(ptr, 0);
     }
     /**
-     * 고급 수채화 브러시 — 붓털 노이즈 + 종이 반응 + 타원형 스탬프
      * @param {number} cx
      * @param {number} cy
      * @param {number} size
@@ -28,7 +27,6 @@ export class WatercolorEngine {
         wasm.watercolorengine_apply_brush(this.__wbg_ptr, cx, cy, size, water, pigment_amount, r, g, b, angle, pressure);
     }
     /**
-     * 고급 스트로크 보간 — 속도 감응 + 안료 소진 + 방향 추적
      * @param {number} x0
      * @param {number} y0
      * @param {number} x1
@@ -47,29 +45,38 @@ export class WatercolorEngine {
     /**
      * @returns {number}
      */
-    grid_size() {
-        const ret = wasm.watercolorengine_grid_size(this.__wbg_ptr);
+    get_height() {
+        const ret = wasm.watercolorengine_get_height(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**
-     * 외부 종이 텍스처 로드
-     * @param {Uint8Array} data
-     * @param {number} width
-     * @param {number} height
+     * @returns {number}
      */
-    load_paper_texture(data, width, height) {
+    get_width() {
+        const ret = wasm.watercolorengine_get_width(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @param {Uint8Array} data
+     * @param {number} tex_w
+     * @param {number} tex_h
+     */
+    load_paper_texture(data, tex_w, tex_h) {
         const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        wasm.watercolorengine_load_paper_texture(this.__wbg_ptr, ptr0, len0, width, height);
+        wasm.watercolorengine_load_paper_texture(this.__wbg_ptr, ptr0, len0, tex_w, tex_h);
     }
-    constructor() {
-        const ret = wasm.watercolorengine_new();
+    /**
+     * @param {number} w
+     * @param {number} h
+     */
+    constructor(w, h) {
+        const ret = wasm.watercolorengine_new(w, h);
         this.__wbg_ptr = ret >>> 0;
         WatercolorEngineFinalization.register(this, this.__wbg_ptr, this);
         return this;
     }
     /**
-     * 렌더링 — 고급 감산 혼합 + 젖은 영역 반짝임 + 과립화
      * @returns {Uint8Array}
      */
     render() {
@@ -104,9 +111,6 @@ export class WatercolorEngine {
     set_show_texture(show) {
         wasm.watercolorengine_set_show_texture(this.__wbg_ptr, show);
     }
-    /**
-     * 시뮬레이션 스텝
-     */
     step() {
         wasm.watercolorengine_step(this.__wbg_ptr);
     }

@@ -1,7 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Palette, Droplets, Waves, Beaker, RefreshCcw, Paintbrush, Image, Gauge } from 'lucide-react';
+import { Palette, Droplets, Waves, Beaker, RefreshCcw, Paintbrush, Image, Gauge, Maximize } from 'lucide-react';
 
 const SCALE = 3;
+
+// 캔버스 비율 프리셋
+const RATIO_PRESETS = [
+    { name: '1:1 정방형', w: 300, h: 300, icon: '◻' },
+    { name: '4:3 가로', w: 400, h: 300, icon: '▬' },
+    { name: '3:4 세로', w: 300, h: 400, icon: '▮' },
+    { name: '16:9 와이드', w: 480, h: 270, icon: '▭' },
+    { name: '9:16 세로', w: 270, h: 480, icon: '▯' },
+    { name: '3:2 가로', w: 450, h: 300, icon: '▬' },
+    { name: '2:3 세로', w: 300, h: 450, icon: '▮' },
+    { name: 'A4 가로', w: 424, h: 300, icon: '📄' },
+    { name: 'A4 세로', w: 300, h: 424, icon: '📄' },
+];
 
 // 프리셋 색상 팔레트
 const COLOR_PRESETS = [
@@ -19,7 +32,6 @@ const COLOR_PRESETS = [
     { name: '로즈 마더', color: '#e11d48' },
 ];
 
-// hex → {r, g, b} (0~1)
 function hexToRgb(hex) {
     const r = parseInt(hex.slice(1, 3), 16) / 255;
     const g = parseInt(hex.slice(3, 5), 16) / 255;
@@ -27,7 +39,6 @@ function hexToRgb(hex) {
     return { r, g, b };
 }
 
-// 슬라이더
 function ControlSlider({ label, value, min, max, step, onChange }) {
     const display = typeof value === 'number' && !Number.isInteger(value)
         ? value.toFixed(3) : value;
@@ -60,38 +71,47 @@ export default function App() {
     const [pigmentProps, setPigmentProps] = useState({ adhesion: 0.05, granularity: 0.8 });
     const [isSimulating, setIsSimulating] = useState(true);
     const [showTexture, setShowTexture] = useState(true);
-    const [gridSize, setGridSize] = useState(300);
+    const [canvasWidth, setCanvasWidth] = useState(300);
+    const [canvasHeight, setCanvasHeight] = useState(300);
+    const [selectedRatio, setSelectedRatio] = useState('1:1 정방형');
     const [paperTextureUrl, setPaperTextureUrl] = useState('');
 
-    // 속도 추적 refs
     const lastPosRef = useRef(null);
     const lastTimeRef = useRef(null);
     const velocityRef = useRef(0);
     const dynamicSizeRef = useRef(8);
 
-    // WASM 초기화
-    useEffect(() => {
-        let cancelled = false;
-        async function initWasm() {
-            try {
-                const wasm = await import('../wasm-pkg/watercolor_engine.js');
+    // WASM 초기화 (width, height 있으면 재생성)
+    const initEngine = useCallback(async (w, h) => {
+        try {
+            let wasm = wasmModuleRef.current;
+            if (!wasm) {
+                wasm = await import('../wasm-pkg/watercolor_engine.js');
                 await wasm.default();
-                if (cancelled) return;
                 wasmModuleRef.current = wasm;
-                const engine = new wasm.WatercolorEngine();
-                engineRef.current = engine;
-                setGridSize(engine.grid_size());
-                setLoading(false);
-            } catch (err) {
-                if (!cancelled) {
-                    console.error('WASM 초기화 실패:', err);
-                    setError(err.message || String(err));
-                }
             }
+            const engine = new wasm.WatercolorEngine(w, h);
+            engineRef.current = engine;
+            setCanvasWidth(w);
+            setCanvasHeight(h);
+            setLoading(false);
+        } catch (err) {
+            console.error('WASM 초기화 실패:', err);
+            setError(err.message || String(err));
         }
-        initWasm();
-        return () => { cancelled = true; };
     }, []);
+
+    useEffect(() => { initEngine(300, 300); }, [initEngine]);
+
+    // 비율 변경
+    const handleRatioChange = useCallback((preset) => {
+        setSelectedRatio(preset.name);
+        setIsSimulating(false);
+        setTimeout(async () => {
+            await initEngine(preset.w, preset.h);
+            setIsSimulating(true);
+        }, 50);
+    }, [initEngine]);
 
     // 종이 텍스처 로드
     const loadPaperTexture = useCallback((url) => {
@@ -100,10 +120,9 @@ export default function App() {
         const img = new window.Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = img.width;
-            tempCanvas.height = img.height;
-            const ctx = tempCanvas.getContext('2d');
+            const tmpC = document.createElement('canvas');
+            tmpC.width = img.width; tmpC.height = img.height;
+            const ctx = tmpC.getContext('2d');
             ctx.drawImage(img, 0, 0);
             const imageData = ctx.getImageData(0, 0, img.width, img.height);
             engine.load_paper_texture(imageData.data, img.width, img.height);
@@ -144,18 +163,19 @@ export default function App() {
         const canvas = canvasRef.current;
         if (!engine || !canvas) return;
         const ctx = canvas.getContext('2d');
-        const gs = gridSize;
+        const w = canvasWidth;
+        const h = canvasHeight;
         const pixelArray = engine.render();
         const pixelData = new Uint8ClampedArray(pixelArray.buffer || pixelArray);
-        const imageData = new ImageData(pixelData, gs, gs);
+        const imageData = new ImageData(pixelData, w, h);
         const tmp = document.createElement('canvas');
-        tmp.width = gs; tmp.height = gs;
+        tmp.width = w; tmp.height = h;
         tmp.getContext('2d').putImageData(imageData, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(tmp, 0, 0, canvas.width, canvas.height);
-    }, [gridSize]);
+    }, [canvasWidth, canvasHeight]);
 
     // 커서 프리뷰
     const drawCursor = useCallback((clientX, clientY) => {
@@ -168,18 +188,13 @@ export default function App() {
         const x = clientX - rect.left;
         const y = clientY - rect.top;
         if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
-
         const dynSize = dynamicSizeRef.current * SCALE;
-
-        // 반투명 브러시 프리뷰
         ctx.beginPath();
         ctx.arc(x, y, dynSize, 0, Math.PI * 2);
         ctx.strokeStyle = activeColor + '88';
         ctx.lineWidth = 1.5;
         ctx.stroke();
         ctx.closePath();
-
-        // 중심점
         ctx.beginPath();
         ctx.arc(x, y, 1.5, 0, Math.PI * 2);
         ctx.fillStyle = activeColor;
@@ -209,22 +224,14 @@ export default function App() {
             const dx = x - lastPosRef.current.x;
             const dy = y - lastPosRef.current.y;
             const dt = (now - lastTimeRef.current) / 1000;
-            if (dt > 0) {
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                velocity = dist / dt; // px/second
-            }
+            if (dt > 0) velocity = Math.sqrt(dx * dx + dy * dy) / dt;
         }
-        // 지수 이동 평균 (부드러운 전환)
         velocityRef.current = velocityRef.current * 0.6 + velocity * 0.4;
-
-        // 속도 감응 브러시 크기
         const sens = brush.speedSensitivity;
         const speedFactor = 1.0 / (1.0 + velocityRef.current * sens * 0.01);
         const minSize = brush.size * 0.3;
-        const dynSize = minSize + (brush.size - minSize) * speedFactor;
-        dynamicSizeRef.current = dynSize;
-
-        return { velocity: velocityRef.current, dynSize };
+        dynamicSizeRef.current = minSize + (brush.size - minSize) * speedFactor;
+        return { velocity: velocityRef.current, dynSize: dynamicSizeRef.current };
     }, [brush.size, brush.speedSensitivity]);
 
     // 브러시 상호작용
@@ -233,11 +240,12 @@ export default function App() {
         const canvas = canvasRef.current;
         if (!engine || !canvas) return;
         const rect = canvas.getBoundingClientRect();
-        const x = Math.floor((e.clientX - rect.left) / SCALE);
-        const y = Math.floor((e.clientY - rect.top) / SCALE);
+        const scaleX = canvasWidth / rect.width;
+        const scaleY = canvasHeight / rect.height;
+        const x = Math.floor((e.clientX - rect.left) * scaleX);
+        const y = Math.floor((e.clientY - rect.top) * scaleY);
         const { r, g, b } = hexToRgb(activeColor);
         const now = performance.now();
-
         const { velocity, dynSize } = calcVelocityAndSize(x, y, now);
 
         if (isFirst || !lastPosRef.current) {
@@ -245,19 +253,15 @@ export default function App() {
         } else {
             engine.apply_brush_stroke(
                 lastPosRef.current.x, lastPosRef.current.y,
-                x, y, dynSize, brush.water, brush.pigment, r, g, b,
-                velocity
-            );
+                x, y, dynSize, brush.water, brush.pigment, r, g, b, velocity);
         }
         lastPosRef.current = { x, y };
         lastTimeRef.current = now;
-
-        // 커서 프리뷰 업데이트
         drawCursor(e.clientX, e.clientY);
-    }, [brush, activeColor, calcVelocityAndSize, drawCursor]);
+    }, [brush, activeColor, canvasWidth, canvasHeight, calcVelocityAndSize, drawCursor]);
 
     const handleMouseDown = useCallback((e) => {
-        velocityRef.current = 0; // 새 스트로크 시작
+        velocityRef.current = 0;
         dynamicSizeRef.current = brush.size;
         handleInteraction(e, true);
         const draw = (me) => handleInteraction(me, false);
@@ -273,22 +277,16 @@ export default function App() {
         window.addEventListener('mouseup', stop);
     }, [handleInteraction, brush.size]);
 
-    // 캔버스 위 마우스 이동 시 커서 프리뷰
-    const handleCanvasMouseMove = useCallback((e) => {
-        drawCursor(e.clientX, e.clientY);
-    }, [drawCursor]);
-
+    const handleCanvasMouseMove = useCallback((e) => drawCursor(e.clientX, e.clientY), [drawCursor]);
     const handleCanvasMouseLeave = useCallback(() => {
-        const cursorCanvas = cursorCanvasRef.current;
-        if (cursorCanvas) {
-            cursorCanvas.getContext('2d').clearRect(0, 0, cursorCanvas.width, cursorCanvas.height);
-        }
+        const cc = cursorCanvasRef.current;
+        if (cc) cc.getContext('2d').clearRect(0, 0, cc.width, cc.height);
     }, []);
 
     const handleReset = useCallback(() => {
-        const engine = engineRef.current;
-        if (!engine) return;
-        engine.reset();
+        const e = engineRef.current;
+        if (!e) return;
+        e.reset();
         renderFrame();
     }, [renderFrame]);
 
@@ -317,6 +315,9 @@ export default function App() {
         );
     }
 
+    const displayW = canvasWidth * SCALE;
+    const displayH = canvasHeight * SCALE;
+
     return (
         <div className="app-container">
             <header className="app-header">
@@ -333,8 +334,31 @@ export default function App() {
             </header>
 
             <main className="main-area">
-                {/* 사이드바 */}
                 <aside className="sidebar">
+                    {/* 캔버스 비율 */}
+                    <section className="card-section">
+                        <div className="section-header">
+                            <Maximize />
+                            <span className="section-title">캔버스 비율</span>
+                        </div>
+                        <div className="ratio-grid">
+                            {RATIO_PRESETS.map((preset) => (
+                                <button
+                                    key={preset.name}
+                                    className={`ratio-btn ${selectedRatio === preset.name ? 'active' : ''}`}
+                                    onClick={() => handleRatioChange(preset)}
+                                    title={`${preset.w}×${preset.h}`}
+                                >
+                                    <span className="ratio-icon">{preset.icon}</span>
+                                    <span className="ratio-label">{preset.name}</span>
+                                </button>
+                            ))}
+                        </div>
+                        <div className="ratio-info">
+                            <span>{canvasWidth}×{canvasHeight}px</span>
+                        </div>
+                    </section>
+
                     {/* 색상 선택 */}
                     <section>
                         <div className="section-header">
@@ -342,23 +366,18 @@ export default function App() {
                             <span className="section-title">색상 선택</span>
                         </div>
                         <div className="color-picker-area">
-                            <input
-                                type="color"
-                                value={activeColor}
+                            <input type="color" value={activeColor}
                                 onChange={(e) => setActiveColor(e.target.value)}
-                                className="color-picker-input"
-                            />
+                                className="color-picker-input" />
                             <span className="color-hex">{activeColor.toUpperCase()}</span>
                         </div>
                         <div className="preset-palette">
                             {COLOR_PRESETS.map((preset) => (
-                                <button
-                                    key={preset.color}
+                                <button key={preset.color}
                                     className={`preset-swatch ${activeColor === preset.color ? 'active' : ''}`}
                                     style={{ backgroundColor: preset.color }}
                                     title={preset.name}
-                                    onClick={() => setActiveColor(preset.color)}
-                                />
+                                    onClick={() => setActiveColor(preset.color)} />
                             ))}
                         </div>
                     </section>
@@ -424,9 +443,7 @@ export default function App() {
                                     style={{ display: 'none' }} />
                             </label>
                             {paperTextureUrl && (
-                                <div className="texture-preview">
-                                    <img src={paperTextureUrl} alt="종이 텍스처" />
-                                </div>
+                                <div className="texture-preview"><img src={paperTextureUrl} alt="종이 텍스처" /></div>
                             )}
                         </div>
                         <div className="toggle-row" onClick={() => setShowTexture(!showTexture)}>
@@ -440,23 +457,14 @@ export default function App() {
 
                 {/* 캔버스 */}
                 <section className="canvas-area">
-                    <div className="canvas-frame"
-                        style={{ width: gridSize * SCALE, height: gridSize * SCALE }}>
-                        <canvas
-                            ref={canvasRef}
-                            width={gridSize * SCALE}
-                            height={gridSize * SCALE}
-                            onMouseDown={handleMouseDown}
-                        />
-                        <canvas
-                            ref={cursorCanvasRef}
-                            className="cursor-canvas"
-                            width={gridSize * SCALE}
-                            height={gridSize * SCALE}
+                    <div className="canvas-frame" style={{ width: displayW, height: displayH }}>
+                        <canvas ref={canvasRef} width={displayW} height={displayH}
+                            onMouseDown={handleMouseDown} />
+                        <canvas ref={cursorCanvasRef} className="cursor-canvas"
+                            width={displayW} height={displayH}
                             onMouseMove={handleCanvasMouseMove}
                             onMouseLeave={handleCanvasMouseLeave}
-                            onMouseDown={handleMouseDown}
-                        />
+                            onMouseDown={handleMouseDown} />
                     </div>
 
                     <div className="status-bar">
@@ -473,8 +481,8 @@ export default function App() {
                             <span className="status-value">{brush.size}px</span>
                         </div>
                         <div className="status-item">
-                            <span className="status-label">GRID</span>
-                            <span className="status-value">{gridSize}×{gridSize}</span>
+                            <span className="status-label">CANVAS</span>
+                            <span className="status-value">{canvasWidth}×{canvasHeight}</span>
                         </div>
                     </div>
                 </section>
