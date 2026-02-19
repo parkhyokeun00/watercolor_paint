@@ -32,6 +32,13 @@ const COLOR_PRESETS = [
     { name: '로즈 마더', color: '#e11d48' },
 ];
 
+const BRUSH_MODES = [
+    { key: 'paint', label: '기본 붓' },
+    { key: 'fade', label: '점진 지우개' },
+    { key: 'blend', label: '블렌딩 붓' },
+    { key: 'water', label: '물 번짐 붓' },
+];
+
 function hexToRgb(hex) {
     const r = parseInt(hex.slice(1, 3), 16) / 255;
     const g = parseInt(hex.slice(3, 5), 16) / 255;
@@ -64,6 +71,10 @@ export default function App() {
     const [error, setError] = useState(null);
     const [activeColor, setActiveColor] = useState('#1e3a8a');
     const [brush, setBrush] = useState({ size: 8, water: 2.5, pigment: 0.6, speedSensitivity: 0.5 });
+    const [brushMode, setBrushMode] = useState('paint');
+    const [fadeStrength, setFadeStrength] = useState(0.35);
+    const [blendStrength, setBlendStrength] = useState(0.45);
+    const [waterFlow, setWaterFlow] = useState(1.0);
     const [physics, setPhysics] = useState({
         dt: 0.15, evaporation: 0.002, viscosity: 0.05,
         pressure: 5.0, iterations: 10,
@@ -248,17 +259,49 @@ export default function App() {
         const now = performance.now();
         const { velocity, dynSize } = calcVelocityAndSize(x, y, now);
 
-        if (isFirst || !lastPosRef.current) {
-            engine.apply_brush(x, y, dynSize, brush.water, brush.pigment, r, g, b, 0.0, 1.0);
-        } else {
-            engine.apply_brush_stroke(
-                lastPosRef.current.x, lastPosRef.current.y,
-                x, y, dynSize, brush.water, brush.pigment, r, g, b, velocity);
+        if (brushMode === 'paint') {
+            if (isFirst || !lastPosRef.current) {
+                engine.apply_brush(x, y, dynSize, brush.water, brush.pigment, r, g, b, 0.0, 1.0);
+            } else {
+                engine.apply_brush_stroke(
+                    lastPosRef.current.x, lastPosRef.current.y,
+                    x, y, dynSize, brush.water, brush.pigment, r, g, b, velocity);
+            }
+        } else if (brushMode === 'fade') {
+            if (isFirst || !lastPosRef.current) {
+                engine.apply_fade_brush_stroke(
+                    x, y,
+                    x, y, dynSize, fadeStrength, velocity);
+            } else {
+                engine.apply_fade_brush_stroke(
+                    lastPosRef.current.x, lastPosRef.current.y,
+                    x, y, dynSize, fadeStrength, velocity);
+            }
+        } else if (brushMode === 'blend') {
+            if (isFirst || !lastPosRef.current) {
+                engine.apply_blend_brush_stroke(
+                    x, y,
+                    x, y, dynSize, blendStrength, velocity);
+            } else {
+                engine.apply_blend_brush_stroke(
+                    lastPosRef.current.x, lastPosRef.current.y,
+                    x, y, dynSize, blendStrength, velocity);
+            }
+        } else if (brushMode === 'water') {
+            if (isFirst || !lastPosRef.current) {
+                engine.apply_water_brush_stroke(
+                    x, y,
+                    x, y, dynSize, brush.water, waterFlow, velocity);
+            } else {
+                engine.apply_water_brush_stroke(
+                    lastPosRef.current.x, lastPosRef.current.y,
+                    x, y, dynSize, brush.water, waterFlow, velocity);
+            }
         }
         lastPosRef.current = { x, y };
         lastTimeRef.current = now;
         drawCursor(e.clientX, e.clientY);
-    }, [brush, activeColor, canvasWidth, canvasHeight, calcVelocityAndSize, drawCursor]);
+    }, [brush, brushMode, fadeStrength, blendStrength, waterFlow, activeColor, canvasWidth, canvasHeight, calcVelocityAndSize, drawCursor]);
 
     const handleMouseDown = useCallback((e) => {
         velocityRef.current = 0;
@@ -399,13 +442,38 @@ export default function App() {
                             <Paintbrush />
                             <span className="section-title">브러시 설정</span>
                         </div>
+                        <div className="ratio-grid">
+                            {BRUSH_MODES.map((mode) => (
+                                <button
+                                    key={mode.key}
+                                    className={`ratio-btn ${brushMode === mode.key ? 'active' : ''}`}
+                                    onClick={() => setBrushMode(mode.key)}
+                                >
+                                    <span className="ratio-label">{mode.label}</span>
+                                </button>
+                            ))}
+                        </div>
                         <div className="slider-group">
                             <ControlSlider label="붓 크기" value={brush.size} min={1} max={25} step={1}
                                 onChange={(v) => setBrush({ ...brush, size: v })} />
                             <ControlSlider label="수분량" value={brush.water} min={0.1} max={5.0} step={0.1}
                                 onChange={(v) => setBrush({ ...brush, water: v })} />
-                            <ControlSlider label="안료 농도" value={brush.pigment} min={0.05} max={2.0} step={0.05}
-                                onChange={(v) => setBrush({ ...brush, pigment: v })} />
+                            {brushMode === 'paint' && (
+                                <ControlSlider label="안료 농도" value={brush.pigment} min={0.05} max={2.0} step={0.05}
+                                    onChange={(v) => setBrush({ ...brush, pigment: v })} />
+                            )}
+                            {brushMode === 'fade' && (
+                                <ControlSlider label="지우기 강도" value={fadeStrength} min={0.05} max={1.0} step={0.05}
+                                    onChange={setFadeStrength} />
+                            )}
+                            {brushMode === 'blend' && (
+                                <ControlSlider label="블렌딩 강도" value={blendStrength} min={0.05} max={1.0} step={0.05}
+                                    onChange={setBlendStrength} />
+                            )}
+                            {brushMode === 'water' && (
+                                <ControlSlider label="번짐 강도" value={waterFlow} min={0.1} max={2.0} step={0.1}
+                                    onChange={setWaterFlow} />
+                            )}
                             <ControlSlider label="속도 감응" value={brush.speedSensitivity} min={0} max={1.0} step={0.05}
                                 onChange={(v) => setBrush({ ...brush, speedSensitivity: v })} />
                         </div>
@@ -501,6 +569,10 @@ export default function App() {
                         </div>
                         <div className="status-item">
                             <span className="status-label">BRUSH</span>
+                            <span className="status-value">{BRUSH_MODES.find((m) => m.key === brushMode)?.label}</span>
+                        </div>
+                        <div className="status-item">
+                            <span className="status-label">SIZE</span>
                             <span className="status-value">{brush.size}px</span>
                         </div>
                         <div className="status-item">

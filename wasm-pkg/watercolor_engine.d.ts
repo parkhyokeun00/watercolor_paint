@@ -4,8 +4,11 @@
 export class WatercolorEngine {
     free(): void;
     [Symbol.dispose](): void;
+    apply_blend_brush_stroke(x0: number, y0: number, x1: number, y1: number, size: number, blend_strength: number, velocity: number): void;
     apply_brush(cx: number, cy: number, size: number, water: number, pigment_amount: number, r: number, g: number, b: number, angle: number, pressure: number): void;
     apply_brush_stroke(x0: number, y0: number, x1: number, y1: number, size: number, water: number, pigment_amount: number, r: number, g: number, b: number, velocity: number): void;
+    apply_fade_brush_stroke(x0: number, y0: number, x1: number, y1: number, size: number, fade_strength: number, velocity: number): void;
+    apply_water_brush_stroke(x0: number, y0: number, x1: number, y1: number, size: number, water_amount: number, flow_strength: number, velocity: number): void;
     get_height(): number;
     get_width(): number;
     load_paper_texture(data: Uint8Array, tex_w: number, tex_h: number): void;
@@ -23,8 +26,11 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_watercolorengine_free: (a: number, b: number) => void;
+    readonly watercolorengine_apply_blend_brush_stroke: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly watercolorengine_apply_brush: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
     readonly watercolorengine_apply_brush_stroke: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
+    readonly watercolorengine_apply_fade_brush_stroke: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+    readonly watercolorengine_apply_water_brush_stroke: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly watercolorengine_get_height: (a: number) => number;
     readonly watercolorengine_get_width: (a: number) => number;
     readonly watercolorengine_load_paper_texture: (a: number, b: number, c: number, d: number, e: number) => void;
