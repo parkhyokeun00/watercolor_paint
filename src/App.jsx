@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Palette, Droplets, Waves, Beaker, RefreshCcw, Paintbrush, Image, Gauge, Maximize, Download } from 'lucide-react';
+import { Palette, Waves, Beaker, RefreshCcw, Paintbrush, Image, Maximize, Download } from 'lucide-react';
 
-const SCALE = 3;
+const DISPLAY_SCALE = 2.2;
 
 // 캔버스 비율 프리셋
 const RATIO_PRESETS = [
-    { name: '1:1 정방형', w: 300, h: 300, icon: '◻' },
-    { name: '4:3 가로', w: 400, h: 300, icon: '▬' },
-    { name: '3:4 세로', w: 300, h: 400, icon: '▮' },
-    { name: '16:9 와이드', w: 480, h: 270, icon: '▭' },
-    { name: '9:16 세로', w: 270, h: 480, icon: '▯' },
-    { name: '3:2 가로', w: 450, h: 300, icon: '▬' },
-    { name: '2:3 세로', w: 300, h: 450, icon: '▮' },
-    { name: 'A4 가로', w: 424, h: 300, icon: '📄' },
-    { name: 'A4 세로', w: 300, h: 424, icon: '📄' },
+    { name: '1:1 정방형', w: 420, h: 420, icon: '◻' },
+    { name: '4:3 가로', w: 560, h: 420, icon: '▬' },
+    { name: '3:4 세로', w: 420, h: 560, icon: '▮' },
+    { name: '16:9 와이드', w: 672, h: 378, icon: '▭' },
+    { name: '9:16 세로', w: 378, h: 672, icon: '▯' },
+    { name: '3:2 가로', w: 630, h: 420, icon: '▬' },
+    { name: '2:3 세로', w: 420, h: 630, icon: '▮' },
+    { name: 'A4 가로', w: 594, h: 420, icon: '📄' },
+    { name: 'A4 세로', w: 420, h: 594, icon: '📄' },
 ];
 
 // 프리셋 색상 팔레트
@@ -30,6 +30,13 @@ const COLOR_PRESETS = [
     { name: '옐로 오커', color: '#a16207' },
     { name: '사프 그린', color: '#65a30d' },
     { name: '로즈 마더', color: '#e11d48' },
+];
+
+const BRUSH_MODES = [
+    { key: 'paint', label: '기본 붓' },
+    { key: 'fade', label: '점진 지우개' },
+    { key: 'blend', label: '블렌딩 붓' },
+    { key: 'water', label: '물 번짐 붓' },
 ];
 
 function hexToRgb(hex) {
@@ -55,6 +62,7 @@ function ControlSlider({ label, value, min, max, step, onChange }) {
 }
 
 export default function App() {
+    const canvasAreaRef = useRef(null);
     const canvasRef = useRef(null);
     const cursorCanvasRef = useRef(null);
     const engineRef = useRef(null);
@@ -64,6 +72,10 @@ export default function App() {
     const [error, setError] = useState(null);
     const [activeColor, setActiveColor] = useState('#1e3a8a');
     const [brush, setBrush] = useState({ size: 8, water: 2.5, pigment: 0.6, speedSensitivity: 0.5 });
+    const [brushMode, setBrushMode] = useState('paint');
+    const [fadeStrength, setFadeStrength] = useState(0.35);
+    const [blendStrength, setBlendStrength] = useState(0.45);
+    const [waterFlow, setWaterFlow] = useState(1.0);
     const [physics, setPhysics] = useState({
         dt: 0.15, evaporation: 0.002, viscosity: 0.05,
         pressure: 5.0, iterations: 10,
@@ -71,9 +83,11 @@ export default function App() {
     const [pigmentProps, setPigmentProps] = useState({ adhesion: 0.05, granularity: 0.8 });
     const [isSimulating, setIsSimulating] = useState(true);
     const [showTexture, setShowTexture] = useState(true);
-    const [canvasWidth, setCanvasWidth] = useState(300);
-    const [canvasHeight, setCanvasHeight] = useState(300);
+    const [canvasWidth, setCanvasWidth] = useState(420);
+    const [canvasHeight, setCanvasHeight] = useState(420);
+    const [canvasViewport, setCanvasViewport] = useState({ w: 0, h: 0 });
     const [selectedRatio, setSelectedRatio] = useState('1:1 정방형');
+    const [freeCanvasSize, setFreeCanvasSize] = useState({ w: 420, h: 420 });
     const [paperTextureUrl, setPaperTextureUrl] = useState('');
 
     const lastPosRef = useRef(null);
@@ -101,17 +115,49 @@ export default function App() {
         }
     }, []);
 
-    useEffect(() => { initEngine(300, 300); }, [initEngine]);
+    useEffect(() => {
+        const initial = RATIO_PRESETS[0];
+        initEngine(initial.w, initial.h);
+    }, [initEngine]);
+
+    useEffect(() => {
+        const node = canvasAreaRef.current;
+        if (!node) return;
+        const update = () => {
+            setCanvasViewport({ w: node.clientWidth, h: node.clientHeight });
+        };
+        update();
+        if (typeof ResizeObserver !== 'undefined') {
+            const obs = new ResizeObserver(update);
+            obs.observe(node);
+            return () => obs.disconnect();
+        }
+        window.addEventListener('resize', update);
+        return () => window.removeEventListener('resize', update);
+    }, []);
 
     // 비율 변경
     const handleRatioChange = useCallback((preset) => {
         setSelectedRatio(preset.name);
+        setFreeCanvasSize({ w: preset.w, h: preset.h });
         setIsSimulating(false);
         setTimeout(async () => {
             await initEngine(preset.w, preset.h);
             setIsSimulating(true);
         }, 50);
     }, [initEngine]);
+
+    const handleFreeCanvasApply = useCallback(() => {
+        const w = Math.max(128, Math.min(1600, Math.floor(freeCanvasSize.w || 0)));
+        const h = Math.max(128, Math.min(1600, Math.floor(freeCanvasSize.h || 0)));
+        setSelectedRatio('프리 캔버스');
+        setFreeCanvasSize({ w, h });
+        setIsSimulating(false);
+        setTimeout(async () => {
+            await initEngine(w, h);
+            setIsSimulating(true);
+        }, 50);
+    }, [freeCanvasSize, initEngine]);
 
     // 종이 텍스처 로드
     const loadPaperTexture = useCallback((url) => {
@@ -188,7 +234,7 @@ export default function App() {
         const x = clientX - rect.left;
         const y = clientY - rect.top;
         if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
-        const dynSize = dynamicSizeRef.current * SCALE;
+        const dynSize = dynamicSizeRef.current * DISPLAY_SCALE;
         ctx.beginPath();
         ctx.arc(x, y, dynSize, 0, Math.PI * 2);
         ctx.strokeStyle = activeColor + '88';
@@ -248,17 +294,49 @@ export default function App() {
         const now = performance.now();
         const { velocity, dynSize } = calcVelocityAndSize(x, y, now);
 
-        if (isFirst || !lastPosRef.current) {
-            engine.apply_brush(x, y, dynSize, brush.water, brush.pigment, r, g, b, 0.0, 1.0);
-        } else {
-            engine.apply_brush_stroke(
-                lastPosRef.current.x, lastPosRef.current.y,
-                x, y, dynSize, brush.water, brush.pigment, r, g, b, velocity);
+        if (brushMode === 'paint') {
+            if (isFirst || !lastPosRef.current) {
+                engine.apply_brush(x, y, dynSize, brush.water, brush.pigment, r, g, b, 0.0, 1.0);
+            } else {
+                engine.apply_brush_stroke(
+                    lastPosRef.current.x, lastPosRef.current.y,
+                    x, y, dynSize, brush.water, brush.pigment, r, g, b, velocity);
+            }
+        } else if (brushMode === 'fade') {
+            if (isFirst || !lastPosRef.current) {
+                engine.apply_fade_brush_stroke(
+                    x, y,
+                    x, y, dynSize, fadeStrength, velocity);
+            } else {
+                engine.apply_fade_brush_stroke(
+                    lastPosRef.current.x, lastPosRef.current.y,
+                    x, y, dynSize, fadeStrength, velocity);
+            }
+        } else if (brushMode === 'blend') {
+            if (isFirst || !lastPosRef.current) {
+                engine.apply_blend_brush_stroke(
+                    x, y,
+                    x, y, dynSize, blendStrength, velocity);
+            } else {
+                engine.apply_blend_brush_stroke(
+                    lastPosRef.current.x, lastPosRef.current.y,
+                    x, y, dynSize, blendStrength, velocity);
+            }
+        } else if (brushMode === 'water') {
+            if (isFirst || !lastPosRef.current) {
+                engine.apply_water_brush_stroke(
+                    x, y,
+                    x, y, dynSize, brush.water, waterFlow, velocity);
+            } else {
+                engine.apply_water_brush_stroke(
+                    lastPosRef.current.x, lastPosRef.current.y,
+                    x, y, dynSize, brush.water, waterFlow, velocity);
+            }
         }
         lastPosRef.current = { x, y };
         lastTimeRef.current = now;
         drawCursor(e.clientX, e.clientY);
-    }, [brush, activeColor, canvasWidth, canvasHeight, calcVelocityAndSize, drawCursor]);
+    }, [brush, brushMode, fadeStrength, blendStrength, waterFlow, activeColor, canvasWidth, canvasHeight, calcVelocityAndSize, drawCursor]);
 
     const handleMouseDown = useCallback((e) => {
         velocityRef.current = 0;
@@ -326,8 +404,14 @@ export default function App() {
         );
     }
 
-    const displayW = canvasWidth * SCALE;
-    const displayH = canvasHeight * SCALE;
+    const displayW = Math.round(canvasWidth * DISPLAY_SCALE);
+    const displayH = Math.round(canvasHeight * DISPLAY_SCALE);
+    const hasViewport = canvasViewport.w > 40 && canvasViewport.h > 40;
+    const availW = hasViewport ? Math.max(1, canvasViewport.w - 24) : displayW;
+    const availH = hasViewport ? Math.max(1, canvasViewport.h - 24) : displayH;
+    const fitScale = hasViewport ? Math.min(1, availW / displayW, availH / displayH) : 1;
+    const frameW = Math.max(1, Math.round(displayW * fitScale));
+    const frameH = Math.max(1, Math.round(displayH * fitScale));
 
     return (
         <div className="app-container">
@@ -368,6 +452,28 @@ export default function App() {
                         <div className="ratio-info">
                             <span>{canvasWidth}×{canvasHeight}px</span>
                         </div>
+                        <div className="free-canvas-row">
+                            <input
+                                type="number"
+                                min={128}
+                                max={1600}
+                                className="free-canvas-input"
+                                value={freeCanvasSize.w}
+                                onChange={(e) => setFreeCanvasSize({ ...freeCanvasSize, w: parseInt(e.target.value || '0', 10) })}
+                                title="가로 픽셀"
+                            />
+                            <span className="free-canvas-sep">×</span>
+                            <input
+                                type="number"
+                                min={128}
+                                max={1600}
+                                className="free-canvas-input"
+                                value={freeCanvasSize.h}
+                                onChange={(e) => setFreeCanvasSize({ ...freeCanvasSize, h: parseInt(e.target.value || '0', 10) })}
+                                title="세로 픽셀"
+                            />
+                            <button className="free-canvas-apply" onClick={handleFreeCanvasApply}>프리 캔버스</button>
+                        </div>
                     </section>
 
                     {/* 색상 선택 */}
@@ -399,13 +505,38 @@ export default function App() {
                             <Paintbrush />
                             <span className="section-title">브러시 설정</span>
                         </div>
+                        <div className="ratio-grid">
+                            {BRUSH_MODES.map((mode) => (
+                                <button
+                                    key={mode.key}
+                                    className={`ratio-btn ${brushMode === mode.key ? 'active' : ''}`}
+                                    onClick={() => setBrushMode(mode.key)}
+                                >
+                                    <span className="ratio-label">{mode.label}</span>
+                                </button>
+                            ))}
+                        </div>
                         <div className="slider-group">
                             <ControlSlider label="붓 크기" value={brush.size} min={1} max={25} step={1}
                                 onChange={(v) => setBrush({ ...brush, size: v })} />
                             <ControlSlider label="수분량" value={brush.water} min={0.1} max={5.0} step={0.1}
                                 onChange={(v) => setBrush({ ...brush, water: v })} />
-                            <ControlSlider label="안료 농도" value={brush.pigment} min={0.05} max={2.0} step={0.05}
-                                onChange={(v) => setBrush({ ...brush, pigment: v })} />
+                            {brushMode === 'paint' && (
+                                <ControlSlider label="안료 농도" value={brush.pigment} min={0.05} max={2.0} step={0.05}
+                                    onChange={(v) => setBrush({ ...brush, pigment: v })} />
+                            )}
+                            {brushMode === 'fade' && (
+                                <ControlSlider label="지우기 강도" value={fadeStrength} min={0.05} max={1.0} step={0.05}
+                                    onChange={setFadeStrength} />
+                            )}
+                            {brushMode === 'blend' && (
+                                <ControlSlider label="블렌딩 강도" value={blendStrength} min={0.05} max={1.0} step={0.05}
+                                    onChange={setBlendStrength} />
+                            )}
+                            {brushMode === 'water' && (
+                                <ControlSlider label="번짐 강도" value={waterFlow} min={0.1} max={2.0} step={0.1}
+                                    onChange={setWaterFlow} />
+                            )}
                             <ControlSlider label="속도 감응" value={brush.speedSensitivity} min={0} max={1.0} step={0.05}
                                 onChange={(v) => setBrush({ ...brush, speedSensitivity: v })} />
                         </div>
@@ -479,8 +610,8 @@ export default function App() {
                 </aside>
 
                 {/* 캔버스 */}
-                <section className="canvas-area">
-                    <div className="canvas-frame" style={{ width: displayW, height: displayH }}>
+                <section className="canvas-area" ref={canvasAreaRef}>
+                    <div className="canvas-frame" style={{ width: frameW, height: frameH }}>
                         <canvas ref={canvasRef} width={displayW} height={displayH}
                             onMouseDown={handleMouseDown} />
                         <canvas ref={cursorCanvasRef} className="cursor-canvas"
@@ -501,6 +632,10 @@ export default function App() {
                         </div>
                         <div className="status-item">
                             <span className="status-label">BRUSH</span>
+                            <span className="status-value">{BRUSH_MODES.find((m) => m.key === brushMode)?.label}</span>
+                        </div>
+                        <div className="status-item">
+                            <span className="status-label">SIZE</span>
                             <span className="status-value">{brush.size}px</span>
                         </div>
                         <div className="status-item">

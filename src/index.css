@@ -153,7 +153,7 @@ body {
 
 /* --- 사이드바 --- */
 .sidebar {
-  width: 300px;
+  width: 280px;
   background: white;
   border-right: 1px solid var(--stone-200);
   padding: 20px;
@@ -450,7 +450,7 @@ input[type="range"]::-moz-range-thumb {
   align-items: center;
   justify-content: center;
   overflow: auto;
-  padding: 48px;
+  padding: 20px;
 }
 
 .canvas-frame {
@@ -477,6 +477,8 @@ canvas {
   top: 0;
   left: 0;
   z-index: 1;
+  width: 100%;
+  height: 100%;
 }
 
 .cursor-canvas {
@@ -547,6 +549,48 @@ canvas {
   letter-spacing: 0.5px;
 }
 
+.free-canvas-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.free-canvas-input {
+  width: 64px;
+  height: 28px;
+  border: 1px solid var(--stone-300);
+  border-radius: var(--radius-sm);
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--stone-700);
+  background: #fff;
+}
+
+.free-canvas-sep {
+  color: var(--stone-400);
+  font-size: 12px;
+}
+
+.free-canvas-apply {
+  margin-left: auto;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--stone-300);
+  border-radius: var(--radius-sm);
+  background: var(--stone-100);
+  color: var(--stone-700);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.free-canvas-apply:hover {
+  border-color: var(--indigo-400);
+  color: var(--indigo-600);
+  background: var(--indigo-50);
+}
+
 /* --- 사이드바 액션 버튼 --- */
 .sidebar-actions {
   display: flex;
@@ -604,8 +648,8 @@ canvas {
 /* --- 상태 요약 바 --- */
 .status-bar {
   position: absolute;
-  bottom: 24px;
-  right: 24px;
+  bottom: 12px;
+  right: 12px;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -616,6 +660,8 @@ canvas {
   display: flex;
   gap: 20px;
   font-size: 10px;
+  max-width: calc(100% - 24px);
+  flex-wrap: wrap;
 }
 
 .status-item {

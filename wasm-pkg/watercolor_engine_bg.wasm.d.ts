@@ -2,8 +2,11 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_watercolorengine_free: (a: number, b: number) => void;
+export const watercolorengine_apply_blend_brush_stroke: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
 export const watercolorengine_apply_brush: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
 export const watercolorengine_apply_brush_stroke: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
+export const watercolorengine_apply_fade_brush_stroke: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+export const watercolorengine_apply_water_brush_stroke: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
 export const watercolorengine_get_height: (a: number) => number;
 export const watercolorengine_get_width: (a: number) => number;
 export const watercolorengine_load_paper_texture: (a: number, b: number, c: number, d: number, e: number) => void;

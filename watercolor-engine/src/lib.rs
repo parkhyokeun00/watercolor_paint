@@ -23,6 +23,7 @@ pub struct WatercolorEngine {
 
     // 종이 텍스처
     paper_h: Vec<f32>,
+    paper_render: Vec<f32>,
 
     // 렌더링 버퍼
     pixels: Vec<u8>,
@@ -74,6 +75,7 @@ impl WatercolorEngine {
                 paper_h[idx] = (0.45 + n1 + n2 + n3 + n4).max(0.0).min(1.0);
             }
         }
+        let paper_render = paper_h.clone();
 
         WatercolorEngine {
             width,
@@ -91,6 +93,7 @@ impl WatercolorEngine {
             dg: vec![0.0; total],
             db: vec![0.0; total],
             paper_h,
+            paper_render,
             pixels: vec![255u8; total * 4],
             dt: 0.15,
             evaporation: 0.002,
@@ -128,6 +131,7 @@ impl WatercolorEngine {
                 }
             }
         }
+        self.rebuild_paper_render_map();
     }
 
     pub fn set_physics(
@@ -264,6 +268,116 @@ impl WatercolorEngine {
         }
     }
 
+    pub fn apply_fade_brush_stroke(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        size: f32,
+        fade_strength: f32,
+        velocity: f32,
+    ) {
+        let dx = (x1 - x0) as f32;
+        let dy = (y1 - y0) as f32;
+        let length = (dx * dx + dy * dy).sqrt();
+        let angle = dy.atan2(dx);
+        let pressure = (1.0 / (1.0 + velocity * 0.08)).max(0.2).min(1.0);
+        let step_size = (size * 0.3).max(0.5);
+        let steps = (length / step_size).ceil().max(1.0) as i32;
+
+        for s in 0..=steps {
+            let t = s as f32 / steps as f32;
+            let x = x0 as f32 + dx * t;
+            let y = y0 as f32 + dy * t;
+            let attenuation = 1.0 - t * 0.2;
+            let jx = ((x * 17.0 + y * 31.0).sin() * 0.5) as i32;
+            let jy = ((x * 23.0 + y * 13.0).cos() * 0.5) as i32;
+            self.apply_fade_brush(
+                x as i32 + jx,
+                y as i32 + jy,
+                size,
+                fade_strength * attenuation,
+                angle,
+                pressure * attenuation,
+            );
+        }
+    }
+
+    pub fn apply_blend_brush_stroke(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        size: f32,
+        blend_strength: f32,
+        velocity: f32,
+    ) {
+        let dx = (x1 - x0) as f32;
+        let dy = (y1 - y0) as f32;
+        let length = (dx * dx + dy * dy).sqrt();
+        let angle = dy.atan2(dx);
+        let pressure = (1.0 / (1.0 + velocity * 0.08)).max(0.2).min(1.0);
+        let step_size = (size * 0.3).max(0.5);
+        let steps = (length / step_size).ceil().max(1.0) as i32;
+
+        for s in 0..=steps {
+            let t = s as f32 / steps as f32;
+            let x = x0 as f32 + dx * t;
+            let y = y0 as f32 + dy * t;
+            let attenuation = 1.0 - t * 0.2;
+            let jx = ((x * 17.0 + y * 31.0).sin() * 0.5) as i32;
+            let jy = ((x * 23.0 + y * 13.0).cos() * 0.5) as i32;
+            self.apply_blend_brush(
+                x as i32 + jx,
+                y as i32 + jy,
+                size,
+                blend_strength * attenuation,
+                angle,
+                pressure * attenuation,
+            );
+        }
+    }
+
+    pub fn apply_water_brush_stroke(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        size: f32,
+        water_amount: f32,
+        flow_strength: f32,
+        velocity: f32,
+    ) {
+        let dx = (x1 - x0) as f32;
+        let dy = (y1 - y0) as f32;
+        let length = (dx * dx + dy * dy).sqrt();
+        let angle = dy.atan2(dx);
+        let pressure = (1.0 / (1.0 + velocity * 0.08)).max(0.2).min(1.0);
+        let step_size = (size * 0.3).max(0.5);
+        let steps = (length / step_size).ceil().max(1.0) as i32;
+
+        for s in 0..=steps {
+            let t = s as f32 / steps as f32;
+            let x = x0 as f32 + dx * t;
+            let y = y0 as f32 + dy * t;
+            let attenuation = 1.0 - t * 0.2;
+            let jx = ((x * 17.0 + y * 31.0).sin() * 0.5) as i32;
+            let jy = ((x * 23.0 + y * 13.0).cos() * 0.5) as i32;
+            self.apply_water_brush(
+                x as i32 + jx,
+                y as i32 + jy,
+                size,
+                water_amount * attenuation,
+                flow_strength * attenuation,
+                angle,
+                pressure * attenuation,
+            );
+        }
+    }
+
     pub fn step(&mut self) {
         self.update_velocities();
         self.relax_divergence();
@@ -293,10 +407,13 @@ impl WatercolorEngine {
             }
 
             if self.show_texture {
-                let paper = self.paper_h[i];
+                let paper = self.paper_render[i];
                 let has_paint = (total_r + total_g + total_b).min(1.0);
-                let tex_strength = 0.06 + has_paint * self.granularity * 0.1;
-                let tex = 1.0 - tex_strength + paper * tex_strength * 2.0;
+                // 칠해진 영역일수록 텍스처 대비를 줄여 가이드 라인 잔상을 완화
+                let tex_fade = (1.0 - has_paint * 0.85).max(0.12);
+                let tex_strength = (0.03 + self.granularity * 0.08) * tex_fade;
+                // 0.5 중심 대비 방식으로 밝은 라인 편향을 줄임
+                let tex = 1.0 + (paper - 0.5) * tex_strength * 1.8;
                 out_r *= tex;
                 out_g *= tex;
                 out_b *= tex;
@@ -327,6 +444,251 @@ impl WatercolorEngine {
 
 // === 내부 시뮬레이션 ===
 impl WatercolorEngine {
+    fn rebuild_paper_render_map(&mut self) {
+        // 물리용 거친 텍스처(paper_h)는 유지하고, 렌더용은 부드럽게 재구성
+        // 하드 라인이 그대로 보이지 않도록 3x3 박스 블러 + 대비 압축 적용
+        let w = self.width;
+        let h = self.height;
+        if self.paper_render.len() != self.total {
+            self.paper_render = vec![0.5; self.total];
+        }
+        for i in 0..h {
+            for j in 0..w {
+                let mut sum = 0.0f32;
+                let mut cnt = 0.0f32;
+                let y0 = i.saturating_sub(1);
+                let y1 = (i + 1).min(h - 1);
+                let x0 = j.saturating_sub(1);
+                let x1 = (j + 1).min(w - 1);
+                for y in y0..=y1 {
+                    for x in x0..=x1 {
+                        sum += self.paper_h[y * w + x];
+                        cnt += 1.0;
+                    }
+                }
+                let avg = sum / cnt.max(1.0);
+                let compressed = 0.5 + (avg - 0.5) * 0.35;
+                self.paper_render[i * w + j] = compressed.max(0.0).min(1.0);
+            }
+        }
+    }
+
+    pub fn apply_fade_brush(
+        &mut self,
+        cx: i32,
+        cy: i32,
+        size: f32,
+        fade_strength: f32,
+        angle: f32,
+        pressure: f32,
+    ) {
+        let w = self.width as i32;
+        let h = self.height as i32;
+        let radius = size.max(0.5);
+        let isize = radius.ceil() as i32;
+        let sigma = radius * 0.45;
+        let sigma2 = sigma * sigma;
+        let cos_a = angle.cos();
+        let sin_a = angle.sin();
+        let aspect = 0.7;
+        let strength = fade_strength.max(0.0).min(1.0);
+
+        for di in -isize..=isize {
+            for dj in -isize..=isize {
+                let tx = cx + di;
+                let ty = cy + dj;
+                if tx < 0 || tx >= w || ty < 0 || ty >= h {
+                    continue;
+                }
+
+                let idx = ty as usize * self.width + tx as usize;
+                let fi = di as f32;
+                let fj = dj as f32;
+                let rot_x = fi * cos_a + fj * sin_a;
+                let rot_y = (-fi * sin_a + fj * cos_a) / aspect;
+                let dist_sq = rot_x * rot_x + rot_y * rot_y;
+                let dist = dist_sq.sqrt();
+                if dist > radius {
+                    continue;
+                }
+
+                let gaussian = (-dist_sq / (2.0 * sigma2)).exp();
+                let paper_val = self.paper_h[idx];
+                let paper_response = 0.7 + 0.3 * (1.0 - paper_val);
+                let wetness = self.h[idx].min(1.0);
+                let wet_boost = 1.0 + wetness * 0.6;
+                let fade = (strength * gaussian * paper_response * pressure * wet_boost * 0.5)
+                    .max(0.0)
+                    .min(0.75);
+                let keep = 1.0 - fade;
+
+                self.gr[idx] *= keep;
+                self.gg[idx] *= keep;
+                self.gb[idx] *= keep;
+                self.dr[idx] *= 1.0 - fade * 0.8;
+                self.dg[idx] *= 1.0 - fade * 0.8;
+                self.db[idx] *= 1.0 - fade * 0.8;
+                self.h[idx] *= 1.0 - fade * 0.25;
+                self.mask[idx] *= 1.0 - fade * 0.5;
+            }
+        }
+    }
+
+    pub fn apply_blend_brush(
+        &mut self,
+        cx: i32,
+        cy: i32,
+        size: f32,
+        blend_strength: f32,
+        angle: f32,
+        pressure: f32,
+    ) {
+        let w = self.width as i32;
+        let h = self.height as i32;
+        let radius = size.max(0.5);
+        let isize = radius.ceil() as i32;
+        let sigma = radius * 0.45;
+        let sigma2 = sigma * sigma;
+        let cos_a = angle.cos();
+        let sin_a = angle.sin();
+        let aspect = 0.7;
+        let strength = blend_strength.max(0.0).min(1.0);
+
+        let src_gr = self.gr.clone();
+        let src_gg = self.gg.clone();
+        let src_gb = self.gb.clone();
+        let src_dr = self.dr.clone();
+        let src_dg = self.dg.clone();
+        let src_db = self.db.clone();
+
+        for di in -isize..=isize {
+            for dj in -isize..=isize {
+                let tx = cx + di;
+                let ty = cy + dj;
+                if tx <= 1 || tx >= w - 1 || ty <= 1 || ty >= h - 1 {
+                    continue;
+                }
+
+                let idx = ty as usize * self.width + tx as usize;
+                let fi = di as f32;
+                let fj = dj as f32;
+                let rot_x = fi * cos_a + fj * sin_a;
+                let rot_y = (-fi * sin_a + fj * cos_a) / aspect;
+                let dist_sq = rot_x * rot_x + rot_y * rot_y;
+                let dist = dist_sq.sqrt();
+                if dist > radius {
+                    continue;
+                }
+
+                let gaussian = (-dist_sq / (2.0 * sigma2)).exp();
+                let blend = (strength * gaussian * pressure).max(0.0).min(0.85);
+                if blend <= 0.001 {
+                    continue;
+                }
+
+                let mut sum_gr = 0.0;
+                let mut sum_gg = 0.0;
+                let mut sum_gb = 0.0;
+                let mut sum_dr = 0.0;
+                let mut sum_dg = 0.0;
+                let mut sum_db = 0.0;
+                let mut count: f32 = 0.0;
+                for ny in (ty - 1)..=(ty + 1) {
+                    for nx in (tx - 1)..=(tx + 1) {
+                        let nidx = ny as usize * self.width + nx as usize;
+                        sum_gr += src_gr[nidx];
+                        sum_gg += src_gg[nidx];
+                        sum_gb += src_gb[nidx];
+                        sum_dr += src_dr[nidx];
+                        sum_dg += src_dg[nidx];
+                        sum_db += src_db[nidx];
+                        count += 1.0;
+                    }
+                }
+                let inv = 1.0 / count.max(1.0);
+                let avg_gr = sum_gr * inv;
+                let avg_gg = sum_gg * inv;
+                let avg_gb = sum_gb * inv;
+                let avg_dr = sum_dr * inv;
+                let avg_dg = sum_dg * inv;
+                let avg_db = sum_db * inv;
+
+                self.gr[idx] = self.gr[idx] * (1.0 - blend) + avg_gr * blend;
+                self.gg[idx] = self.gg[idx] * (1.0 - blend) + avg_gg * blend;
+                self.gb[idx] = self.gb[idx] * (1.0 - blend) + avg_gb * blend;
+                self.dr[idx] = self.dr[idx] * (1.0 - blend) + avg_dr * blend;
+                self.dg[idx] = self.dg[idx] * (1.0 - blend) + avg_dg * blend;
+                self.db[idx] = self.db[idx] * (1.0 - blend) + avg_db * blend;
+                self.h[idx] += blend * 0.04;
+                self.mask[idx] = 1.0;
+            }
+        }
+    }
+
+    pub fn apply_water_brush(
+        &mut self,
+        cx: i32,
+        cy: i32,
+        size: f32,
+        water_amount: f32,
+        flow_strength: f32,
+        angle: f32,
+        pressure: f32,
+    ) {
+        let w = self.width as i32;
+        let h = self.height as i32;
+        let radius = size.max(0.5);
+        let isize = radius.ceil() as i32;
+        let sigma = radius * 0.45;
+        let sigma2 = sigma * sigma;
+        let cos_a = angle.cos();
+        let sin_a = angle.sin();
+        let aspect = 0.7;
+        let flow = flow_strength.max(0.0).min(2.0);
+
+        for di in -isize..=isize {
+            for dj in -isize..=isize {
+                let tx = cx + di;
+                let ty = cy + dj;
+                if tx <= 1 || tx >= w - 1 || ty <= 1 || ty >= h - 1 {
+                    continue;
+                }
+
+                let idx = ty as usize * self.width + tx as usize;
+                let fi = di as f32;
+                let fj = dj as f32;
+                let rot_x = fi * cos_a + fj * sin_a;
+                let rot_y = (-fi * sin_a + fj * cos_a) / aspect;
+                let dist_sq = rot_x * rot_x + rot_y * rot_y;
+                let dist = dist_sq.sqrt();
+                if dist > radius {
+                    continue;
+                }
+
+                let gaussian = (-dist_sq / (2.0 * sigma2)).exp();
+                let radial_x = fi / (radius + 0.001);
+                let radial_y = fj / (radius + 0.001);
+                let edge = smoothstep(0.2, 1.0, dist / radius);
+                let add_water = water_amount * gaussian * pressure * 0.45;
+                self.h[idx] += add_water;
+                self.u[idx] += radial_x * flow * edge * 0.04;
+                self.v[idx] += radial_y * flow * edge * 0.04;
+
+                let lift = (gaussian * flow * 0.06).min(0.2);
+                let move_r = self.dr[idx] * lift;
+                let move_g = self.dg[idx] * lift;
+                let move_b = self.db[idx] * lift;
+                self.dr[idx] -= move_r;
+                self.dg[idx] -= move_g;
+                self.db[idx] -= move_b;
+                self.gr[idx] += move_r;
+                self.gg[idx] += move_g;
+                self.gb[idx] += move_b;
+                self.mask[idx] = 1.0;
+            }
+        }
+    }
+
     fn update_velocities(&mut self) {
         let w = self.width;
         let friction = 1.0 - self.viscosity;

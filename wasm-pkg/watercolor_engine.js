@@ -12,6 +12,18 @@ export class WatercolorEngine {
         wasm.__wbg_watercolorengine_free(ptr, 0);
     }
     /**
+     * @param {number} x0
+     * @param {number} y0
+     * @param {number} x1
+     * @param {number} y1
+     * @param {number} size
+     * @param {number} blend_strength
+     * @param {number} velocity
+     */
+    apply_blend_brush_stroke(x0, y0, x1, y1, size, blend_strength, velocity) {
+        wasm.watercolorengine_apply_blend_brush_stroke(this.__wbg_ptr, x0, y0, x1, y1, size, blend_strength, velocity);
+    }
+    /**
      * @param {number} cx
      * @param {number} cy
      * @param {number} size
@@ -41,6 +53,31 @@ export class WatercolorEngine {
      */
     apply_brush_stroke(x0, y0, x1, y1, size, water, pigment_amount, r, g, b, velocity) {
         wasm.watercolorengine_apply_brush_stroke(this.__wbg_ptr, x0, y0, x1, y1, size, water, pigment_amount, r, g, b, velocity);
+    }
+    /**
+     * @param {number} x0
+     * @param {number} y0
+     * @param {number} x1
+     * @param {number} y1
+     * @param {number} size
+     * @param {number} fade_strength
+     * @param {number} velocity
+     */
+    apply_fade_brush_stroke(x0, y0, x1, y1, size, fade_strength, velocity) {
+        wasm.watercolorengine_apply_fade_brush_stroke(this.__wbg_ptr, x0, y0, x1, y1, size, fade_strength, velocity);
+    }
+    /**
+     * @param {number} x0
+     * @param {number} y0
+     * @param {number} x1
+     * @param {number} y1
+     * @param {number} size
+     * @param {number} water_amount
+     * @param {number} flow_strength
+     * @param {number} velocity
+     */
+    apply_water_brush_stroke(x0, y0, x1, y1, size, water_amount, flow_strength, velocity) {
+        wasm.watercolorengine_apply_water_brush_stroke(this.__wbg_ptr, x0, y0, x1, y1, size, water_amount, flow_strength, velocity);
     }
     /**
      * @returns {number}
