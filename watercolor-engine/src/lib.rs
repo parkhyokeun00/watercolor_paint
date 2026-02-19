@@ -23,6 +23,7 @@ pub struct WatercolorEngine {
 
     // 종이 텍스처
     paper_h: Vec<f32>,
+    paper_render: Vec<f32>,
 
     // 렌더링 버퍼
     pixels: Vec<u8>,
@@ -74,6 +75,7 @@ impl WatercolorEngine {
                 paper_h[idx] = (0.45 + n1 + n2 + n3 + n4).max(0.0).min(1.0);
             }
         }
+        let paper_render = paper_h.clone();
 
         WatercolorEngine {
             width,
@@ -91,6 +93,7 @@ impl WatercolorEngine {
             dg: vec![0.0; total],
             db: vec![0.0; total],
             paper_h,
+            paper_render,
             pixels: vec![255u8; total * 4],
             dt: 0.15,
             evaporation: 0.002,
@@ -128,6 +131,7 @@ impl WatercolorEngine {
                 }
             }
         }
+        self.rebuild_paper_render_map();
     }
 
     pub fn set_physics(
@@ -293,10 +297,13 @@ impl WatercolorEngine {
             }
 
             if self.show_texture {
-                let paper = self.paper_h[i];
+                let paper = self.paper_render[i];
                 let has_paint = (total_r + total_g + total_b).min(1.0);
-                let tex_strength = 0.06 + has_paint * self.granularity * 0.1;
-                let tex = 1.0 - tex_strength + paper * tex_strength * 2.0;
+                // 칠해진 영역일수록 텍스처 대비를 줄여 가이드 라인 잔상을 완화
+                let tex_fade = (1.0 - has_paint * 0.85).max(0.12);
+                let tex_strength = (0.03 + self.granularity * 0.08) * tex_fade;
+                // 0.5 중심 대비 방식으로 밝은 라인 편향을 줄임
+                let tex = 1.0 + (paper - 0.5) * tex_strength * 1.8;
                 out_r *= tex;
                 out_g *= tex;
                 out_b *= tex;
@@ -327,6 +334,35 @@ impl WatercolorEngine {
 
 // === 내부 시뮬레이션 ===
 impl WatercolorEngine {
+    fn rebuild_paper_render_map(&mut self) {
+        // 물리용 거친 텍스처(paper_h)는 유지하고, 렌더용은 부드럽게 재구성
+        // 하드 라인이 그대로 보이지 않도록 3x3 박스 블러 + 대비 압축 적용
+        let w = self.width;
+        let h = self.height;
+        if self.paper_render.len() != self.total {
+            self.paper_render = vec![0.5; self.total];
+        }
+        for i in 0..h {
+            for j in 0..w {
+                let mut sum = 0.0f32;
+                let mut cnt = 0.0f32;
+                let y0 = i.saturating_sub(1);
+                let y1 = (i + 1).min(h - 1);
+                let x0 = j.saturating_sub(1);
+                let x1 = (j + 1).min(w - 1);
+                for y in y0..=y1 {
+                    for x in x0..=x1 {
+                        sum += self.paper_h[y * w + x];
+                        cnt += 1.0;
+                    }
+                }
+                let avg = sum / cnt.max(1.0);
+                let compressed = 0.5 + (avg - 0.5) * 0.35;
+                self.paper_render[i * w + j] = compressed.max(0.0).min(1.0);
+            }
+        }
+    }
+
     fn update_velocities(&mut self) {
         let w = self.width;
         let friction = 1.0 - self.viscosity;
