@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Palette, Droplets, Waves, Beaker, RefreshCcw, Paintbrush, Image, Gauge, Maximize, Download } from 'lucide-react';
+import { Palette, Waves, Beaker, RefreshCcw, Paintbrush, Image, Maximize, Download } from 'lucide-react';
 
-const SCALE = 3;
+const DISPLAY_SCALE = 2.2;
 
 // 캔버스 비율 프리셋
 const RATIO_PRESETS = [
-    { name: '1:1 정방형', w: 300, h: 300, icon: '◻' },
-    { name: '4:3 가로', w: 400, h: 300, icon: '▬' },
-    { name: '3:4 세로', w: 300, h: 400, icon: '▮' },
-    { name: '16:9 와이드', w: 480, h: 270, icon: '▭' },
-    { name: '9:16 세로', w: 270, h: 480, icon: '▯' },
-    { name: '3:2 가로', w: 450, h: 300, icon: '▬' },
-    { name: '2:3 세로', w: 300, h: 450, icon: '▮' },
-    { name: 'A4 가로', w: 424, h: 300, icon: '📄' },
-    { name: 'A4 세로', w: 300, h: 424, icon: '📄' },
+    { name: '1:1 정방형', w: 420, h: 420, icon: '◻' },
+    { name: '4:3 가로', w: 560, h: 420, icon: '▬' },
+    { name: '3:4 세로', w: 420, h: 560, icon: '▮' },
+    { name: '16:9 와이드', w: 672, h: 378, icon: '▭' },
+    { name: '9:16 세로', w: 378, h: 672, icon: '▯' },
+    { name: '3:2 가로', w: 630, h: 420, icon: '▬' },
+    { name: '2:3 세로', w: 420, h: 630, icon: '▮' },
+    { name: 'A4 가로', w: 594, h: 420, icon: '📄' },
+    { name: 'A4 세로', w: 420, h: 594, icon: '📄' },
 ];
 
 // 프리셋 색상 팔레트
@@ -62,6 +62,7 @@ function ControlSlider({ label, value, min, max, step, onChange }) {
 }
 
 export default function App() {
+    const canvasAreaRef = useRef(null);
     const canvasRef = useRef(null);
     const cursorCanvasRef = useRef(null);
     const engineRef = useRef(null);
@@ -82,9 +83,11 @@ export default function App() {
     const [pigmentProps, setPigmentProps] = useState({ adhesion: 0.05, granularity: 0.8 });
     const [isSimulating, setIsSimulating] = useState(true);
     const [showTexture, setShowTexture] = useState(true);
-    const [canvasWidth, setCanvasWidth] = useState(300);
-    const [canvasHeight, setCanvasHeight] = useState(300);
+    const [canvasWidth, setCanvasWidth] = useState(420);
+    const [canvasHeight, setCanvasHeight] = useState(420);
+    const [canvasViewport, setCanvasViewport] = useState({ w: 0, h: 0 });
     const [selectedRatio, setSelectedRatio] = useState('1:1 정방형');
+    const [freeCanvasSize, setFreeCanvasSize] = useState({ w: 420, h: 420 });
     const [paperTextureUrl, setPaperTextureUrl] = useState('');
 
     const lastPosRef = useRef(null);
@@ -112,17 +115,49 @@ export default function App() {
         }
     }, []);
 
-    useEffect(() => { initEngine(300, 300); }, [initEngine]);
+    useEffect(() => {
+        const initial = RATIO_PRESETS[0];
+        initEngine(initial.w, initial.h);
+    }, [initEngine]);
+
+    useEffect(() => {
+        const node = canvasAreaRef.current;
+        if (!node) return;
+        const update = () => {
+            setCanvasViewport({ w: node.clientWidth, h: node.clientHeight });
+        };
+        update();
+        if (typeof ResizeObserver !== 'undefined') {
+            const obs = new ResizeObserver(update);
+            obs.observe(node);
+            return () => obs.disconnect();
+        }
+        window.addEventListener('resize', update);
+        return () => window.removeEventListener('resize', update);
+    }, []);
 
     // 비율 변경
     const handleRatioChange = useCallback((preset) => {
         setSelectedRatio(preset.name);
+        setFreeCanvasSize({ w: preset.w, h: preset.h });
         setIsSimulating(false);
         setTimeout(async () => {
             await initEngine(preset.w, preset.h);
             setIsSimulating(true);
         }, 50);
     }, [initEngine]);
+
+    const handleFreeCanvasApply = useCallback(() => {
+        const w = Math.max(128, Math.min(1600, Math.floor(freeCanvasSize.w || 0)));
+        const h = Math.max(128, Math.min(1600, Math.floor(freeCanvasSize.h || 0)));
+        setSelectedRatio('프리 캔버스');
+        setFreeCanvasSize({ w, h });
+        setIsSimulating(false);
+        setTimeout(async () => {
+            await initEngine(w, h);
+            setIsSimulating(true);
+        }, 50);
+    }, [freeCanvasSize, initEngine]);
 
     // 종이 텍스처 로드
     const loadPaperTexture = useCallback((url) => {
@@ -199,7 +234,7 @@ export default function App() {
         const x = clientX - rect.left;
         const y = clientY - rect.top;
         if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
-        const dynSize = dynamicSizeRef.current * SCALE;
+        const dynSize = dynamicSizeRef.current * DISPLAY_SCALE;
         ctx.beginPath();
         ctx.arc(x, y, dynSize, 0, Math.PI * 2);
         ctx.strokeStyle = activeColor + '88';
@@ -369,8 +404,14 @@ export default function App() {
         );
     }
 
-    const displayW = canvasWidth * SCALE;
-    const displayH = canvasHeight * SCALE;
+    const displayW = Math.round(canvasWidth * DISPLAY_SCALE);
+    const displayH = Math.round(canvasHeight * DISPLAY_SCALE);
+    const hasViewport = canvasViewport.w > 40 && canvasViewport.h > 40;
+    const availW = hasViewport ? Math.max(1, canvasViewport.w - 24) : displayW;
+    const availH = hasViewport ? Math.max(1, canvasViewport.h - 24) : displayH;
+    const fitScale = hasViewport ? Math.min(1, availW / displayW, availH / displayH) : 1;
+    const frameW = Math.max(1, Math.round(displayW * fitScale));
+    const frameH = Math.max(1, Math.round(displayH * fitScale));
 
     return (
         <div className="app-container">
@@ -410,6 +451,28 @@ export default function App() {
                         </div>
                         <div className="ratio-info">
                             <span>{canvasWidth}×{canvasHeight}px</span>
+                        </div>
+                        <div className="free-canvas-row">
+                            <input
+                                type="number"
+                                min={128}
+                                max={1600}
+                                className="free-canvas-input"
+                                value={freeCanvasSize.w}
+                                onChange={(e) => setFreeCanvasSize({ ...freeCanvasSize, w: parseInt(e.target.value || '0', 10) })}
+                                title="가로 픽셀"
+                            />
+                            <span className="free-canvas-sep">×</span>
+                            <input
+                                type="number"
+                                min={128}
+                                max={1600}
+                                className="free-canvas-input"
+                                value={freeCanvasSize.h}
+                                onChange={(e) => setFreeCanvasSize({ ...freeCanvasSize, h: parseInt(e.target.value || '0', 10) })}
+                                title="세로 픽셀"
+                            />
+                            <button className="free-canvas-apply" onClick={handleFreeCanvasApply}>프리 캔버스</button>
                         </div>
                     </section>
 
@@ -547,8 +610,8 @@ export default function App() {
                 </aside>
 
                 {/* 캔버스 */}
-                <section className="canvas-area">
-                    <div className="canvas-frame" style={{ width: displayW, height: displayH }}>
+                <section className="canvas-area" ref={canvasAreaRef}>
+                    <div className="canvas-frame" style={{ width: frameW, height: frameH }}>
                         <canvas ref={canvasRef} width={displayW} height={displayH}
                             onMouseDown={handleMouseDown} />
                         <canvas ref={cursorCanvasRef} className="cursor-canvas"
