@@ -37,6 +37,7 @@ const BRUSH_MODES = [
     { key: 'background', label: '배경 붓' },
     { key: 'fade', label: '점진 지우개' },
     { key: 'blend', label: '블렌딩 붓' },
+    { key: 'silhouette_blend', label: '실루엣 블렌딩' },
     { key: 'water', label: '물 번짐 붓' },
 ];
 
@@ -349,6 +350,16 @@ export default function App() {
                     lastPosRef.current.x, lastPosRef.current.y,
                     x, y, dynSize, blendStrength, velocity);
             }
+        } else if (brushMode === 'silhouette_blend') {
+            if (isFirst || !lastPosRef.current) {
+                engine.apply_silhouette_blend_brush_stroke(
+                    x, y,
+                    x, y, dynSize, blendStrength, velocity);
+            } else {
+                engine.apply_silhouette_blend_brush_stroke(
+                    lastPosRef.current.x, lastPosRef.current.y,
+                    x, y, dynSize, blendStrength, velocity);
+            }
         } else if (brushMode === 'water') {
             if (isFirst || !lastPosRef.current) {
                 engine.apply_water_brush_stroke(
@@ -572,7 +583,7 @@ export default function App() {
                                 <ControlSlider label="지우기 강도" value={fadeStrength} min={0.05} max={1.0} step={0.05}
                                     onChange={setFadeStrength} />
                             )}
-                            {brushMode === 'blend' && (
+                            {(brushMode === 'blend' || brushMode === 'silhouette_blend') && (
                                 <ControlSlider label="블렌딩 강도" value={blendStrength} min={0.05} max={1.0} step={0.05}
                                     onChange={setBlendStrength} />
                             )}
