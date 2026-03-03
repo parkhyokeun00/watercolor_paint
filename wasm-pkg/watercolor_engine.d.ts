@@ -4,6 +4,8 @@
 export class WatercolorEngine {
     free(): void;
     [Symbol.dispose](): void;
+    apply_background_brush(cx: number, cy: number, size: number, water: number, pigment_amount: number, r: number, g: number, b: number): void;
+    apply_background_brush_stroke(x0: number, y0: number, x1: number, y1: number, size: number, water: number, pigment_amount: number, r: number, g: number, b: number): void;
     apply_blend_brush_stroke(x0: number, y0: number, x1: number, y1: number, size: number, blend_strength: number, velocity: number): void;
     apply_brush(cx: number, cy: number, size: number, water: number, pigment_amount: number, r: number, g: number, b: number, angle: number, pressure: number): void;
     apply_brush_stroke(x0: number, y0: number, x1: number, y1: number, size: number, water: number, pigment_amount: number, r: number, g: number, b: number, velocity: number): void;
@@ -18,6 +20,7 @@ export class WatercolorEngine {
     set_physics(dt: number, evaporation: number, viscosity: number, pressure: number, iterations: number): void;
     set_pigment_props(adhesion: number, granularity: number): void;
     set_show_texture(show: boolean): void;
+    set_silhouette_controls(silhouette_strength: number, edge_bleed_strength: number): void;
     step(): void;
 }
 
@@ -26,6 +29,8 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_watercolorengine_free: (a: number, b: number) => void;
+    readonly watercolorengine_apply_background_brush: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+    readonly watercolorengine_apply_background_brush_stroke: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
     readonly watercolorengine_apply_blend_brush_stroke: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly watercolorengine_apply_brush: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
     readonly watercolorengine_apply_brush_stroke: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
@@ -40,6 +45,7 @@ export interface InitOutput {
     readonly watercolorengine_set_physics: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly watercolorengine_set_pigment_props: (a: number, b: number, c: number) => void;
     readonly watercolorengine_set_show_texture: (a: number, b: number) => void;
+    readonly watercolorengine_set_silhouette_controls: (a: number, b: number, c: number) => void;
     readonly watercolorengine_step: (a: number) => void;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

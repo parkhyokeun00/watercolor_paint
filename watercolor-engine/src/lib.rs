@@ -24,6 +24,8 @@ pub struct WatercolorEngine {
     // 종이 텍스처
     paper_h: Vec<f32>,
     paper_render: Vec<f32>,
+    silhouette_map: Vec<f32>,
+    silhouette_edge: Vec<f32>,
 
     // 렌더링 버퍼
     pixels: Vec<u8>,
@@ -40,7 +42,8 @@ pub struct WatercolorEngine {
     granularity: f32,
 
     show_texture: bool,
-    seed: u32,
+    silhouette_strength: f32,
+    edge_bleed_strength: f32,
 }
 
 fn rng(seed: &mut u32) -> f32 {
@@ -94,6 +97,8 @@ impl WatercolorEngine {
             db: vec![0.0; total],
             paper_h,
             paper_render,
+            silhouette_map: vec![1.0; total],
+            silhouette_edge: vec![0.0; total],
             pixels: vec![255u8; total * 4],
             dt: 0.15,
             evaporation: 0.002,
@@ -103,7 +108,8 @@ impl WatercolorEngine {
             adhesion: 0.05,
             granularity: 0.8,
             show_texture: true,
-            seed,
+            silhouette_strength: 0.85,
+            edge_bleed_strength: 0.35,
         }
     }
 
@@ -127,11 +133,14 @@ impl WatercolorEngine {
                         + data[src_idx + 1] as f32 * 0.59
                         + data[src_idx + 2] as f32 * 0.11)
                         / 255.0;
+                    let alpha = data[src_idx + 3] as f32 / 255.0;
                     self.paper_h[i * self.width + j] = gray;
+                    self.silhouette_map[i * self.width + j] = ((1.0 - gray) * alpha).max(0.0).min(1.0);
                 }
             }
         }
         self.rebuild_paper_render_map();
+        self.rebuild_silhouette_edge_map();
     }
 
     pub fn set_physics(
@@ -156,6 +165,11 @@ impl WatercolorEngine {
 
     pub fn set_show_texture(&mut self, show: bool) {
         self.show_texture = show;
+    }
+
+    pub fn set_silhouette_controls(&mut self, silhouette_strength: f32, edge_bleed_strength: f32) {
+        self.silhouette_strength = silhouette_strength.max(0.0).min(1.5);
+        self.edge_bleed_strength = edge_bleed_strength.max(0.0).min(2.0);
     }
 
     pub fn apply_brush(
@@ -212,7 +226,18 @@ impl WatercolorEngine {
                 let edge_factor = 1.0 + smoothstep(0.5, 0.95, norm_dist) * 0.6;
                 let wetness = self.h[idx].min(1.0);
                 let wet_spread = 1.0 + wetness * 0.4;
-                let brush_factor = gaussian * paper_response * bristle_noise * pressure;
+                let silhouette = self.silhouette_map[idx];
+                let base_allow = 1.0 - self.silhouette_strength
+                    + self.silhouette_strength * silhouette;
+                let edge_escape = self.edge_bleed_strength
+                    * self.silhouette_edge[idx]
+                    * smoothstep(0.65, 1.0, norm_dist)
+                    * (1.0 - silhouette);
+                let allow = (base_allow + edge_escape).max(0.0).min(1.0);
+                if allow <= 0.001 {
+                    continue;
+                }
+                let brush_factor = gaussian * paper_response * bristle_noise * pressure * allow;
 
                 self.h[idx] += water * brush_factor * wet_spread * 0.7;
                 let pig_factor = pigment_amount * brush_factor * edge_factor * 0.5;
@@ -265,6 +290,101 @@ impl WatercolorEngine {
                 angle,
                 pressure * attenuation,
             );
+        }
+    }
+
+    pub fn apply_background_brush(
+        &mut self,
+        cx: i32,
+        cy: i32,
+        size: f32,
+        water: f32,
+        pigment_amount: f32,
+        r: f32,
+        g: f32,
+        b: f32,
+    ) {
+        let w = self.width as i32;
+        let h = self.height as i32;
+        let radius = size.max(1.0);
+        let isize = radius.ceil() as i32;
+        let sigma = radius * 0.62;
+        let sigma2 = sigma * sigma;
+
+        for di in -isize..=isize {
+            for dj in -isize..=isize {
+                let tx = cx + di;
+                let ty = cy + dj;
+                if tx < 0 || tx >= w || ty < 0 || ty >= h {
+                    continue;
+                }
+
+                let idx = ty as usize * self.width + tx as usize;
+                let fi = di as f32;
+                let fj = dj as f32;
+                let dist_sq = fi * fi + fj * fj;
+                let dist = dist_sq.sqrt();
+                if dist > radius {
+                    continue;
+                }
+
+                let norm_dist = dist / radius;
+                let feather = 1.0 - smoothstep(0.72, 1.0, norm_dist);
+                if feather <= 0.001 {
+                    continue;
+                }
+
+                let paper_val = self.paper_h[idx];
+                let paper_response = 0.7 + 0.3 * (1.0 - paper_val);
+                let gaussian = (-dist_sq / (2.0 * sigma2)).exp();
+                let existing = (self.dr[idx]
+                    + self.dg[idx]
+                    + self.db[idx]
+                    + self.gr[idx] * 0.7
+                    + self.gg[idx] * 0.7
+                    + self.gb[idx] * 0.7)
+                    .min(1.5);
+                // 이미 칠한 전경은 최대한 보호하고, 빈 종이 위주로 배경색을 깔아준다.
+                let background_allow = (1.0 - existing * 1.3).max(0.0).min(1.0);
+                if background_allow <= 0.001 {
+                    continue;
+                }
+
+                let factor = gaussian * feather * paper_response * background_allow;
+                self.h[idx] += water * factor * 0.28;
+                let pig = pigment_amount * factor * 0.26;
+                self.gr[idx] += (1.0 - r) * pig;
+                self.gg[idx] += (1.0 - g) * pig;
+                self.gb[idx] += (1.0 - b) * pig;
+                self.mask[idx] = (self.mask[idx] + 0.22 * factor).min(1.0);
+            }
+        }
+    }
+
+    pub fn apply_background_brush_stroke(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        size: f32,
+        water: f32,
+        pigment_amount: f32,
+        r: f32,
+        g: f32,
+        b: f32,
+    ) {
+        let dx = (x1 - x0) as f32;
+        let dy = (y1 - y0) as f32;
+        let length = (dx * dx + dy * dy).sqrt();
+        let step_size = (size * 0.18).max(1.5);
+        let steps = (length / step_size).ceil().max(1.0) as i32;
+
+        for s in 0..=steps {
+            let t = s as f32 / steps as f32;
+            let x = x0 as f32 + dx * t;
+            let y = y0 as f32 + dy * t;
+            self.apply_background_brush(x as i32, y as i32, size, water, pigment_amount, r, g, b);
         }
     }
 
@@ -444,6 +564,16 @@ impl WatercolorEngine {
 
 // === 내부 시뮬레이션 ===
 impl WatercolorEngine {
+    fn silhouette_transport_factor(&self, idx: usize) -> f32 {
+        if self.silhouette_strength <= 0.001 {
+            return 1.0;
+        }
+        let sil = self.silhouette_map[idx];
+        let base = 1.0 - self.silhouette_strength + self.silhouette_strength * sil;
+        let fringe = (1.0 - sil) * self.silhouette_edge[idx] * self.edge_bleed_strength * 0.9;
+        (base + fringe).max(0.0).min(1.0)
+    }
+
     fn rebuild_paper_render_map(&mut self) {
         // 물리용 거친 텍스처(paper_h)는 유지하고, 렌더용은 부드럽게 재구성
         // 하드 라인이 그대로 보이지 않도록 3x3 박스 블러 + 대비 압축 적용
@@ -470,6 +600,31 @@ impl WatercolorEngine {
                 let compressed = 0.5 + (avg - 0.5) * 0.35;
                 self.paper_render[i * w + j] = compressed.max(0.0).min(1.0);
             }
+        }
+    }
+
+    fn rebuild_silhouette_edge_map(&mut self) {
+        let w = self.width;
+        let h = self.height;
+        if self.silhouette_edge.len() != self.total {
+            self.silhouette_edge = vec![0.0; self.total];
+        }
+        for i in 1..(h - 1) {
+            for j in 1..(w - 1) {
+                let idx = i * w + j;
+                let gx = self.silhouette_map[idx + 1] - self.silhouette_map[idx - 1];
+                let gy = self.silhouette_map[idx + w] - self.silhouette_map[idx - w];
+                let g = (gx * gx + gy * gy).sqrt();
+                self.silhouette_edge[idx] = (g * 3.0).max(0.0).min(1.0);
+            }
+        }
+        for j in 0..w {
+            self.silhouette_edge[j] = 0.0;
+            self.silhouette_edge[(h - 1) * w + j] = 0.0;
+        }
+        for i in 0..h {
+            self.silhouette_edge[i * w] = 0.0;
+            self.silhouette_edge[i * w + (w - 1)] = 0.0;
         }
     }
 
@@ -670,9 +825,11 @@ impl WatercolorEngine {
                 let radial_y = fj / (radius + 0.001);
                 let edge = smoothstep(0.2, 1.0, dist / radius);
                 let add_water = water_amount * gaussian * pressure * 0.45;
-                self.h[idx] += add_water;
-                self.u[idx] += radial_x * flow * edge * 0.04;
-                self.v[idx] += radial_y * flow * edge * 0.04;
+                let transport = self.silhouette_transport_factor(idx);
+                let damp = 0.2 + 0.8 * transport;
+                self.h[idx] += add_water * damp;
+                self.u[idx] += radial_x * flow * edge * 0.04 * damp;
+                self.v[idx] += radial_y * flow * edge * 0.04 * damp;
 
                 let lift = (gaussian * flow * 0.06).min(0.2);
                 let move_r = self.dr[idx] * lift;
@@ -784,6 +941,13 @@ impl WatercolorEngine {
                     + self.gb[idx10] * w10
                     + self.gb[idx01] * w01
                     + self.gb[idx11] * w11;
+
+                let transport = self.silhouette_transport_factor(idx);
+                let damp = 0.15 + transport * 0.85;
+                next_h[idx] *= damp;
+                next_r[idx] *= damp;
+                next_g[idx] *= damp;
+                next_b[idx] *= damp;
             }
         }
 

@@ -34,6 +34,7 @@ const COLOR_PRESETS = [
 
 const BRUSH_MODES = [
     { key: 'paint', label: '기본 붓' },
+    { key: 'background', label: '배경 붓' },
     { key: 'fade', label: '점진 지우개' },
     { key: 'blend', label: '블렌딩 붓' },
     { key: 'water', label: '물 번짐 붓' },
@@ -72,6 +73,7 @@ export default function App() {
     const [error, setError] = useState(null);
     const [activeColor, setActiveColor] = useState('#1e3a8a');
     const [brush, setBrush] = useState({ size: 8, water: 2.5, pigment: 0.6, speedSensitivity: 0.5 });
+    const [backgroundBrush, setBackgroundBrush] = useState({ size: 90, water: 1.4, pigment: 0.35 });
     const [brushMode, setBrushMode] = useState('paint');
     const [fadeStrength, setFadeStrength] = useState(0.35);
     const [blendStrength, setBlendStrength] = useState(0.45);
@@ -83,12 +85,15 @@ export default function App() {
     const [pigmentProps, setPigmentProps] = useState({ adhesion: 0.05, granularity: 0.8 });
     const [isSimulating, setIsSimulating] = useState(true);
     const [showTexture, setShowTexture] = useState(true);
+    const [silhouetteStrength, setSilhouetteStrength] = useState(0.85);
+    const [edgeBleedStrength, setEdgeBleedStrength] = useState(0.35);
     const [canvasWidth, setCanvasWidth] = useState(420);
     const [canvasHeight, setCanvasHeight] = useState(420);
     const [canvasViewport, setCanvasViewport] = useState({ w: 0, h: 0 });
     const [selectedRatio, setSelectedRatio] = useState('1:1 정방형');
     const [freeCanvasSize, setFreeCanvasSize] = useState({ w: 420, h: 420 });
     const [paperTextureUrl, setPaperTextureUrl] = useState('');
+    const [freePaintMode, setFreePaintMode] = useState(false);
 
     const lastPosRef = useRef(null);
     const lastTimeRef = useRef(null);
@@ -203,6 +208,14 @@ export default function App() {
         e.set_show_texture(showTexture);
     }, [showTexture]);
 
+    useEffect(() => {
+        const e = engineRef.current;
+        if (!e || !e.set_silhouette_controls) return;
+        const appliedSilhouetteStrength = freePaintMode ? 0 : silhouetteStrength;
+        const appliedEdgeBleedStrength = freePaintMode ? 0 : edgeBleedStrength;
+        e.set_silhouette_controls(appliedSilhouetteStrength, appliedEdgeBleedStrength);
+    }, [silhouetteStrength, edgeBleedStrength, freePaintMode]);
+
     // 렌더링
     const renderFrame = useCallback(() => {
         const engine = engineRef.current;
@@ -273,12 +286,16 @@ export default function App() {
             if (dt > 0) velocity = Math.sqrt(dx * dx + dy * dy) / dt;
         }
         velocityRef.current = velocityRef.current * 0.6 + velocity * 0.4;
+        if (brushMode === 'background') {
+            dynamicSizeRef.current = backgroundBrush.size;
+            return { velocity: velocityRef.current, dynSize: dynamicSizeRef.current };
+        }
         const sens = brush.speedSensitivity;
         const speedFactor = 1.0 / (1.0 + velocityRef.current * sens * 0.01);
         const minSize = brush.size * 0.3;
         dynamicSizeRef.current = minSize + (brush.size - minSize) * speedFactor;
         return { velocity: velocityRef.current, dynSize: dynamicSizeRef.current };
-    }, [brush.size, brush.speedSensitivity]);
+    }, [brushMode, backgroundBrush.size, brush.size, brush.speedSensitivity]);
 
     // 브러시 상호작용
     const handleInteraction = useCallback((e, isFirst) => {
@@ -301,6 +318,16 @@ export default function App() {
                 engine.apply_brush_stroke(
                     lastPosRef.current.x, lastPosRef.current.y,
                     x, y, dynSize, brush.water, brush.pigment, r, g, b, velocity);
+            }
+        } else if (brushMode === 'background') {
+            if (isFirst || !lastPosRef.current) {
+                engine.apply_background_brush_stroke(
+                    x, y,
+                    x, y, dynSize, backgroundBrush.water, backgroundBrush.pigment, r, g, b);
+            } else {
+                engine.apply_background_brush_stroke(
+                    lastPosRef.current.x, lastPosRef.current.y,
+                    x, y, dynSize, backgroundBrush.water, backgroundBrush.pigment, r, g, b);
             }
         } else if (brushMode === 'fade') {
             if (isFirst || !lastPosRef.current) {
@@ -336,24 +363,24 @@ export default function App() {
         lastPosRef.current = { x, y };
         lastTimeRef.current = now;
         drawCursor(e.clientX, e.clientY);
-    }, [brush, brushMode, fadeStrength, blendStrength, waterFlow, activeColor, canvasWidth, canvasHeight, calcVelocityAndSize, drawCursor]);
+    }, [brush, backgroundBrush, brushMode, fadeStrength, blendStrength, waterFlow, activeColor, canvasWidth, canvasHeight, calcVelocityAndSize, drawCursor]);
 
     const handleMouseDown = useCallback((e) => {
         velocityRef.current = 0;
-        dynamicSizeRef.current = brush.size;
+        dynamicSizeRef.current = brushMode === 'background' ? backgroundBrush.size : brush.size;
         handleInteraction(e, true);
         const draw = (me) => handleInteraction(me, false);
         const stop = () => {
             lastPosRef.current = null;
             lastTimeRef.current = null;
             velocityRef.current = 0;
-            dynamicSizeRef.current = brush.size;
+            dynamicSizeRef.current = brushMode === 'background' ? backgroundBrush.size : brush.size;
             window.removeEventListener('mousemove', draw);
             window.removeEventListener('mouseup', stop);
         };
         window.addEventListener('mousemove', draw);
         window.addEventListener('mouseup', stop);
-    }, [handleInteraction, brush.size]);
+    }, [handleInteraction, brushMode, brush.size, backgroundBrush.size]);
 
     const handleCanvasMouseMove = useCallback((e) => drawCursor(e.clientX, e.clientY), [drawCursor]);
     const handleCanvasMouseLeave = useCallback(() => {
@@ -517,13 +544,29 @@ export default function App() {
                             ))}
                         </div>
                         <div className="slider-group">
-                            <ControlSlider label="붓 크기" value={brush.size} min={1} max={25} step={1}
-                                onChange={(v) => setBrush({ ...brush, size: v })} />
-                            <ControlSlider label="수분량" value={brush.water} min={0.1} max={5.0} step={0.1}
-                                onChange={(v) => setBrush({ ...brush, water: v })} />
+                            {brushMode !== 'background' && (
+                                <ControlSlider label="붓 크기" value={brush.size} min={1} max={25} step={1}
+                                    onChange={(v) => setBrush({ ...brush, size: v })} />
+                            )}
+                            {brushMode === 'background' && (
+                                <ControlSlider label="배경 붓 크기" value={backgroundBrush.size} min={20} max={220} step={2}
+                                    onChange={(v) => setBackgroundBrush({ ...backgroundBrush, size: v })} />
+                            )}
+                            {brushMode !== 'background' && (
+                                <ControlSlider label="수분량" value={brush.water} min={0.1} max={5.0} step={0.1}
+                                    onChange={(v) => setBrush({ ...brush, water: v })} />
+                            )}
+                            {brushMode === 'background' && (
+                                <ControlSlider label="배경 수분량" value={backgroundBrush.water} min={0.1} max={3.0} step={0.1}
+                                    onChange={(v) => setBackgroundBrush({ ...backgroundBrush, water: v })} />
+                            )}
                             {brushMode === 'paint' && (
                                 <ControlSlider label="안료 농도" value={brush.pigment} min={0.05} max={2.0} step={0.05}
                                     onChange={(v) => setBrush({ ...brush, pigment: v })} />
+                            )}
+                            {brushMode === 'background' && (
+                                <ControlSlider label="배경 안료 농도" value={backgroundBrush.pigment} min={0.05} max={0.9} step={0.05}
+                                    onChange={(v) => setBackgroundBrush({ ...backgroundBrush, pigment: v })} />
                             )}
                             {brushMode === 'fade' && (
                                 <ControlSlider label="지우기 강도" value={fadeStrength} min={0.05} max={1.0} step={0.05}
@@ -537,8 +580,10 @@ export default function App() {
                                 <ControlSlider label="번짐 강도" value={waterFlow} min={0.1} max={2.0} step={0.1}
                                     onChange={setWaterFlow} />
                             )}
-                            <ControlSlider label="속도 감응" value={brush.speedSensitivity} min={0} max={1.0} step={0.05}
-                                onChange={(v) => setBrush({ ...brush, speedSensitivity: v })} />
+                            {brushMode !== 'background' && (
+                                <ControlSlider label="속도 감응" value={brush.speedSensitivity} min={0} max={1.0} step={0.05}
+                                    onChange={(v) => setBrush({ ...brush, speedSensitivity: v })} />
+                            )}
                         </div>
                     </section>
 
@@ -594,6 +639,30 @@ export default function App() {
                                 <div className="toggle-thumb" />
                             </div>
                         </div>
+                        <div className="toggle-row" onClick={() => setFreePaintMode(!freePaintMode)}>
+                            <span className="toggle-label">자유 색칠 모드 (구버전)</span>
+                            <div className={`toggle-track ${freePaintMode ? 'on' : 'off'}`}>
+                                <div className="toggle-thumb" />
+                            </div>
+                        </div>
+                        <div className="slider-group">
+                            <ControlSlider
+                                label="실루엣 강도"
+                                value={silhouetteStrength}
+                                min={0}
+                                max={1.5}
+                                step={0.05}
+                                onChange={setSilhouetteStrength}
+                            />
+                            <ControlSlider
+                                label="외곽 번짐 강도"
+                                value={edgeBleedStrength}
+                                min={0}
+                                max={2.0}
+                                step={0.05}
+                                onChange={setEdgeBleedStrength}
+                            />
+                        </div>
                     </section>
 
                     {/* 작업 관리 */}
@@ -636,11 +705,15 @@ export default function App() {
                         </div>
                         <div className="status-item">
                             <span className="status-label">SIZE</span>
-                            <span className="status-value">{brush.size}px</span>
+                            <span className="status-value">{brushMode === 'background' ? backgroundBrush.size : brush.size}px</span>
                         </div>
                         <div className="status-item">
                             <span className="status-label">CANVAS</span>
                             <span className="status-value">{canvasWidth}×{canvasHeight}</span>
+                        </div>
+                        <div className="status-item">
+                            <span className="status-label">PAINT</span>
+                            <span className="status-value">{freePaintMode ? '자유(구버전)' : '실루엣 제약'}</span>
                         </div>
                     </div>
                 </section>

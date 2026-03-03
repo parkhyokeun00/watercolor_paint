@@ -12,6 +12,34 @@ export class WatercolorEngine {
         wasm.__wbg_watercolorengine_free(ptr, 0);
     }
     /**
+     * @param {number} cx
+     * @param {number} cy
+     * @param {number} size
+     * @param {number} water
+     * @param {number} pigment_amount
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     */
+    apply_background_brush(cx, cy, size, water, pigment_amount, r, g, b) {
+        wasm.watercolorengine_apply_background_brush(this.__wbg_ptr, cx, cy, size, water, pigment_amount, r, g, b);
+    }
+    /**
+     * @param {number} x0
+     * @param {number} y0
+     * @param {number} x1
+     * @param {number} y1
+     * @param {number} size
+     * @param {number} water
+     * @param {number} pigment_amount
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     */
+    apply_background_brush_stroke(x0, y0, x1, y1, size, water, pigment_amount, r, g, b) {
+        wasm.watercolorengine_apply_background_brush_stroke(this.__wbg_ptr, x0, y0, x1, y1, size, water, pigment_amount, r, g, b);
+    }
+    /**
      * @param {number} x0
      * @param {number} y0
      * @param {number} x1
@@ -147,6 +175,13 @@ export class WatercolorEngine {
      */
     set_show_texture(show) {
         wasm.watercolorengine_set_show_texture(this.__wbg_ptr, show);
+    }
+    /**
+     * @param {number} silhouette_strength
+     * @param {number} edge_bleed_strength
+     */
+    set_silhouette_controls(silhouette_strength, edge_bleed_strength) {
+        wasm.watercolorengine_set_silhouette_controls(this.__wbg_ptr, silhouette_strength, edge_bleed_strength);
     }
     step() {
         wasm.watercolorengine_step(this.__wbg_ptr);
