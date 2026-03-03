@@ -460,6 +460,150 @@ impl WatercolorEngine {
         }
     }
 
+    pub fn apply_silhouette_blend_brush(
+        &mut self,
+        cx: i32,
+        cy: i32,
+        size: f32,
+        blend_strength: f32,
+        angle: f32,
+        pressure: f32,
+    ) {
+        let w = self.width as i32;
+        let h = self.height as i32;
+        let radius = size.max(0.5);
+        let isize = radius.ceil() as i32;
+        let sigma = radius * 0.45;
+        let sigma2 = sigma * sigma;
+        let cos_a = angle.cos();
+        let sin_a = angle.sin();
+        let aspect = 0.7;
+        let strength = blend_strength.max(0.0).min(1.0);
+
+        let src_gr = self.gr.clone();
+        let src_gg = self.gg.clone();
+        let src_gb = self.gb.clone();
+        let src_dr = self.dr.clone();
+        let src_dg = self.dg.clone();
+        let src_db = self.db.clone();
+
+        for di in -isize..=isize {
+            for dj in -isize..=isize {
+                let tx = cx + di;
+                let ty = cy + dj;
+                if tx <= 1 || tx >= w - 1 || ty <= 1 || ty >= h - 1 {
+                    continue;
+                }
+
+                let idx = ty as usize * self.width + tx as usize;
+                let silhouette = self.silhouette_map[idx];
+                // 실루엣이 낮은 영역은 블렌딩 대상에서 제외
+                if silhouette < 0.12 {
+                    continue;
+                }
+
+                let fi = di as f32;
+                let fj = dj as f32;
+                let rot_x = fi * cos_a + fj * sin_a;
+                let rot_y = (-fi * sin_a + fj * cos_a) / aspect;
+                let dist_sq = rot_x * rot_x + rot_y * rot_y;
+                let dist = dist_sq.sqrt();
+                if dist > radius {
+                    continue;
+                }
+
+                let gaussian = (-dist_sq / (2.0 * sigma2)).exp();
+                let sil_weight = smoothstep(0.12, 0.6, silhouette);
+                let blend = (strength * gaussian * pressure * sil_weight).max(0.0).min(0.9);
+                if blend <= 0.001 {
+                    continue;
+                }
+
+                let mut sum_gr = 0.0;
+                let mut sum_gg = 0.0;
+                let mut sum_gb = 0.0;
+                let mut sum_dr = 0.0;
+                let mut sum_dg = 0.0;
+                let mut sum_db = 0.0;
+                let mut weight_sum = 0.0;
+
+                for ny in (ty - 1)..=(ty + 1) {
+                    for nx in (tx - 1)..=(tx + 1) {
+                        let nidx = ny as usize * self.width + nx as usize;
+                        let ns = self.silhouette_map[nidx];
+                        if ns < 0.12 {
+                            continue;
+                        }
+                        let nw = smoothstep(0.12, 0.6, ns);
+                        sum_gr += src_gr[nidx] * nw;
+                        sum_gg += src_gg[nidx] * nw;
+                        sum_gb += src_gb[nidx] * nw;
+                        sum_dr += src_dr[nidx] * nw;
+                        sum_dg += src_dg[nidx] * nw;
+                        sum_db += src_db[nidx] * nw;
+                        weight_sum += nw;
+                    }
+                }
+
+                if weight_sum <= 0.0001 {
+                    continue;
+                }
+                let inv = 1.0 / weight_sum;
+                let avg_gr = sum_gr * inv;
+                let avg_gg = sum_gg * inv;
+                let avg_gb = sum_gb * inv;
+                let avg_dr = sum_dr * inv;
+                let avg_dg = sum_dg * inv;
+                let avg_db = sum_db * inv;
+
+                self.gr[idx] = self.gr[idx] * (1.0 - blend) + avg_gr * blend;
+                self.gg[idx] = self.gg[idx] * (1.0 - blend) + avg_gg * blend;
+                self.gb[idx] = self.gb[idx] * (1.0 - blend) + avg_gb * blend;
+                self.dr[idx] = self.dr[idx] * (1.0 - blend) + avg_dr * blend;
+                self.dg[idx] = self.dg[idx] * (1.0 - blend) + avg_dg * blend;
+                self.db[idx] = self.db[idx] * (1.0 - blend) + avg_db * blend;
+                self.h[idx] += blend * 0.03;
+                self.mask[idx] = 1.0;
+            }
+        }
+    }
+
+    pub fn apply_silhouette_blend_brush_stroke(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        size: f32,
+        blend_strength: f32,
+        velocity: f32,
+    ) {
+        let dx = (x1 - x0) as f32;
+        let dy = (y1 - y0) as f32;
+        let length = (dx * dx + dy * dy).sqrt();
+        let angle = dy.atan2(dx);
+        let pressure = (1.0 / (1.0 + velocity * 0.08)).max(0.2).min(1.0);
+        let step_size = (size * 0.3).max(0.5);
+        let steps = (length / step_size).ceil().max(1.0) as i32;
+
+        for s in 0..=steps {
+            let t = s as f32 / steps as f32;
+            let x = x0 as f32 + dx * t;
+            let y = y0 as f32 + dy * t;
+            let attenuation = 1.0 - t * 0.2;
+            let jx = ((x * 17.0 + y * 31.0).sin() * 0.5) as i32;
+            let jy = ((x * 23.0 + y * 13.0).cos() * 0.5) as i32;
+            self.apply_silhouette_blend_brush(
+                x as i32 + jx,
+                y as i32 + jy,
+                size,
+                blend_strength * attenuation,
+                angle,
+                pressure * attenuation,
+            );
+        }
+    }
+
     pub fn apply_water_brush_stroke(
         &mut self,
         x0: i32,

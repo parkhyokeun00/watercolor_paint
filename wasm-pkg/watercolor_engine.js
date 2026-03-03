@@ -95,6 +95,29 @@ export class WatercolorEngine {
         wasm.watercolorengine_apply_fade_brush_stroke(this.__wbg_ptr, x0, y0, x1, y1, size, fade_strength, velocity);
     }
     /**
+     * @param {number} cx
+     * @param {number} cy
+     * @param {number} size
+     * @param {number} blend_strength
+     * @param {number} angle
+     * @param {number} pressure
+     */
+    apply_silhouette_blend_brush(cx, cy, size, blend_strength, angle, pressure) {
+        wasm.watercolorengine_apply_silhouette_blend_brush(this.__wbg_ptr, cx, cy, size, blend_strength, angle, pressure);
+    }
+    /**
+     * @param {number} x0
+     * @param {number} y0
+     * @param {number} x1
+     * @param {number} y1
+     * @param {number} size
+     * @param {number} blend_strength
+     * @param {number} velocity
+     */
+    apply_silhouette_blend_brush_stroke(x0, y0, x1, y1, size, blend_strength, velocity) {
+        wasm.watercolorengine_apply_silhouette_blend_brush_stroke(this.__wbg_ptr, x0, y0, x1, y1, size, blend_strength, velocity);
+    }
+    /**
      * @param {number} x0
      * @param {number} y0
      * @param {number} x1
